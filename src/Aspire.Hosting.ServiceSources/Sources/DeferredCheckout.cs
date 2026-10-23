@@ -102,7 +102,6 @@ internal sealed class DeferredCheckout
     /// </summary>
     private static readonly TimeSpan ProgressPublishInterval = TimeSpan.FromSeconds(1);
 
-    // Plain object rather than System.Threading.Lock: this package still targets net8.0.
     private readonly object _gate = new();
 
     private readonly List<Deferred> _deferred = [];

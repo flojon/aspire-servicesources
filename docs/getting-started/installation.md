@@ -9,7 +9,7 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 
 ## Requirements
 
-- .NET 8 or later — net8.0, net9.0 and net10.0 are all supported.
+- .NET 10 or later — the package targets net10.0 only. AppHosts on net8.0 or net9.0 stay on 0.8.x.
 - An AppHost project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
 - Aspire 13.6.1 or later — see below.
 - Whatever the sources you use need on `PATH`: `git` 2.7+ for [`"repository"`](../sources/repository.md),

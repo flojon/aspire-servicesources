@@ -47,7 +47,6 @@ internal static class ServiceConfigAudit
 
     private sealed class Subscription
     {
-        // Plain object rather than System.Threading.Lock: this package still targets net8.0.
         private readonly object _gate = new();
 
         private bool _subscribed;

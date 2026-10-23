@@ -76,8 +76,6 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       # `floor` reads the $(AspireVersion) default out of Directory.Build.props, so this leg

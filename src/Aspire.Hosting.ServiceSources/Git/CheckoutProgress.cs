@@ -43,7 +43,6 @@ internal sealed class CheckoutProgress : IGitProgressSink
     /// </remarks>
     private const int RetainedLines = 512;
 
-    // Plain object rather than System.Threading.Lock: this package still targets net8.0.
     private readonly object _gate = new();
     private readonly Queue<string> _retained = new();
     private readonly List<Channel<string>> _readers = [];

@@ -21,7 +21,6 @@ internal sealed class PathBuildGate
 
     private readonly Dictionary<string, SemaphoreSlim> _semaphores = new(BuildGroupKey.Comparer);
 
-    // Plain object rather than System.Threading.Lock: this package still targets net8.0.
     private readonly object _gate = new();
 
     public static PathBuildGate For(IDistributedApplicationBuilder builder) =>
