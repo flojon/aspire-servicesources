@@ -16,6 +16,8 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-23
+
 ### Breaking
 
 - **Deferred checkout is now the default for a cold `"repository"` service; `UseDeferredCheckout()` is
@@ -1989,7 +1991,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/flojon/aspire-servicesources/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/flojon/aspire-servicesources/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...v0.5.1
