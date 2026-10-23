@@ -11,7 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </summary>
 /// <remarks>
 /// A distinct, deliberate value — not the same as a blank/absent <c>source</c>, which still means
-/// "not configured at all" (see <see cref="Config.ServiceSourcesConfigCache.ResolveService"/>).
+/// "not configured at all" (see <see cref="Config.ServiceSourcesConfigCache.ResolveServiceOrNotConfigured"/>).
 /// <para>
 /// Shares <see cref="UrlSource"/>'s unregistered-facade shape (<see cref="ResolvedService.BridgeUnregistered"/>),
 /// including the <see cref="UnregisteredServiceStartupGuard"/> wait-drop (#170) — but registers no

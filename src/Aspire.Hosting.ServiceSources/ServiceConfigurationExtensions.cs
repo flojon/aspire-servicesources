@@ -247,7 +247,7 @@ public static class ServiceConfigurationExtensions
                 $"{opening}: its source is '{new Name(source)}' — "
                 + $"{Raw.Escaped(OutOfBandSourceAdvice.SourceDetail(source))}. "
                 + $"{Raw.Escaped(OutOfBandSourceAdvice.ConfigureInsteadClause(source))}, or "
-                + $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+                + $"{OutOfBandSourceAdvice.SwitchSourceLiteral(source)}.");
         }
 
         return Raw.Compose($"{opening}: {ResolvedAs<T>(source, real ?? resource)}.");

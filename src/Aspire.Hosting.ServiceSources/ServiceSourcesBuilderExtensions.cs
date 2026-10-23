@@ -96,10 +96,10 @@ public static class ServiceSourcesBuilderExtensions
         // hear about an unrelated entry nothing else names.
         ServiceConfigAudit.EnsureSubscribed(builder);
 
-        var (definition, resolvedConfig, notConfigured) =
+        var (definition, developerConfig, notConfigured) =
             ServiceSourcesConfigCache.ResolveServiceOrNotConfigured(builder, name);
 
-        if (resolvedConfig is null)
+        if (developerConfig is null)
         {
             // Strict mode is the behaviour before the opt-in existed: the same exception, unchanged.
             if (!InteractiveServiceConfiguration.IsEnabled(builder))
@@ -112,8 +112,6 @@ public static class ServiceSourcesBuilderExtensions
 
             return UnconfiguredSource.Resolve(builder, name);
         }
-
-        var developerConfig = resolvedConfig;
 
         // Resolved once here rather than inside each source: the source that actually reads it
         // must not depend on ServiceSourcesConfigCache.LoadedFor by itself, which would tie its unit
@@ -301,8 +299,8 @@ public static class ServiceSourcesBuilderExtensions
     /// endpoints and shows <c>Not configured</c>.
     /// </summary>
     /// <remarks>
-    /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>
-    /// environment variable is set (other than to <c>false</c> or <c>0</c>), so a committed call does
+    /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>,
+    /// <c>TF_BUILD</c> or <c>JENKINS_URL</c> environment variable is set (other than to <c>false</c> or <c>0</c>), so a committed call does
     /// not weaken CI, and in publish mode. The same <c>SERVICESOURCES_INTERACTIVE</c> setting that
     /// governs the source-pick prompt overrides the <c>CI</c> check once this has been called:
     /// <c>true</c> forces it on, <c>false</c> restores the exception. Without this call nothing

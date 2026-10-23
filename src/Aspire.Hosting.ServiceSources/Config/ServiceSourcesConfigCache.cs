@@ -106,7 +106,7 @@ internal static class ServiceSourcesConfigCache
     /// <c>"local"</c> — when nothing configures it.
     /// </summary>
     /// <remarks>
-    /// Unconfigured is the default rather than an error, unlike <see cref="ResolveService"/>: a
+    /// Unconfigured is the default rather than an error, unlike <see cref="ResolveServiceOrNotConfigured"/>: a
     /// backing service with no entry runs from the factory the AppHost passed to
     /// <c>AddBackingService</c>, which is what an AppHost nobody has pointed at a cluster does for
     /// every one of them. There is nothing for the developer to fix, so there is nothing to report.
@@ -130,18 +130,10 @@ internal static class ServiceSourcesConfigCache
                 new ConfigLoader<IReadOnlyDictionary<string, BackingServiceDeveloperConfig>>())
             .Load(builder, DeveloperConfiguration.ReadBackingServicesFrom);
 
-    public static (ServiceDefinition Definition, ServiceDeveloperConfig DeveloperConfig) ResolveService(
-        IDistributedApplicationBuilder builder, string serviceName)
-    {
-        var (definition, developerConfig, notConfigured) = ResolveServiceOrNotConfigured(builder, serviceName);
-
-        return notConfigured is null ? (definition, developerConfig!) : throw notConfigured;
-    }
-
     /// <summary>
-    /// <see cref="ResolveService"/> with the one failure a developer can fix by answering a
-    /// question — a declared service no configuration layer gave a source — returned instead of
-    /// thrown. A service the catalog does not declare still throws: that is the AppHost's mistake.
+    /// Resolves a declared service's definition and developer config. The one failure a developer can
+    /// fix by answering a question — a declared service no configuration layer gave a source — is
+    /// returned rather than thrown. A service the catalog does not declare still throws: that is the AppHost's mistake.
     /// </summary>
     public static (ServiceDefinition Definition, ServiceDeveloperConfig? DeveloperConfig,
         ServiceSourcesConfigurationException? NotConfigured) ResolveServiceOrNotConfigured(

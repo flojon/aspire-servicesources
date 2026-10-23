@@ -110,12 +110,12 @@ public static class ServiceEndpointExtensions
             }
 
             // Same dead end as "disabled": nothing runs for it, so declaring an endpoint is skipped.
-            if (string.Equals(annotation?.Source, "unconfigured", StringComparison.Ordinal))
+            if (string.Equals(annotation?.Source, Sources.UnconfiguredSource.SourceName, StringComparison.Ordinal))
             {
                 return Raw.Compose(
                     $"Service '{name}' exposes no endpoint, so there is none to reference.{source} No source "
                     + $"has been chosen for it, so nothing is running to give it one. To get one, "
-                    + $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+                    + $"{Raw.Literal(OutOfBandSourceAdvice.ChooseSource)}.");
             }
 
             return Raw.Compose(

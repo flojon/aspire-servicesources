@@ -29,8 +29,8 @@ public class AddServiceCatalogTests
 
         // Both calls' entries end up in the same composed catalog — a second AddServiceCatalog
         // call appends rather than replacing the first.
-        var (orders, _) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        var (payments, _) = ServiceSourcesConfigCache.ResolveService(builder, "payments");
+        var (orders, _) = ResolveServiceStrict.For(builder, "orders");
+        var (payments, _) = ResolveServiceStrict.For(builder, "payments");
 
         Assert.Equal("https://orders.example", orders.Url!.Url);
         Assert.Equal("https://payments.example", payments.Url!.Url);
@@ -62,7 +62,7 @@ public class AddServiceCatalogTests
             """{ "services": { "orders": { "source": "url" } } }""");
         var builder = CreateBuilder(dir);
         builder.AddServiceCatalog(c => c.AddService("orders").WithUrl("https://example.com"));
-        ServiceSourcesConfigCache.ResolveService(builder, "orders"); // reads and freezes the catalog
+        ResolveServiceStrict.For(builder, "orders"); // reads and freezes the catalog
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddServiceCatalog(c => c.AddService("payments")));

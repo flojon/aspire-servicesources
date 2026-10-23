@@ -461,8 +461,8 @@ public class GroupPathSourceTests
                 ["services"] = new JsonObject { ["orders"] = Repository("repository"), ["basket"] = Repository("repository") },
             }.ToJsonString());
         var builder = TestHelpers.CreateBuilderThatCanStart(appHost);
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "basket");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 

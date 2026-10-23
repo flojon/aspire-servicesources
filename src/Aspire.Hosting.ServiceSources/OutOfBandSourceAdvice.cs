@@ -34,6 +34,26 @@ internal static class OutOfBandSourceAdvice
         "a 'container' block for 'container' (WithContainer in a code catalog)";
 
     /// <summary>
+    /// The advice for a service nobody chose a source for: there is nothing to switch from, so it is
+    /// a choice to make, and the same catalog precondition applies to the answers.
+    /// </summary>
+    internal const string ChooseSource =
+        "choose a 'repository' or 'container' source for it — which works only where its catalog entry " +
+        "already declares that source: a 'repository' or 'repositoryRef' for 'repository' " +
+        "(WithRepository or WithSharedRepository in a code catalog), a 'container' block for 'container' " +
+        "(WithContainer in a code catalog)";
+
+    /// <summary>The source-change advice that fits <paramref name="source"/>.</summary>
+    internal static Messages.Raw SwitchSourceLiteral(string source) =>
+        string.Equals(source, Sources.UnconfiguredSource.SourceName, StringComparison.Ordinal)
+            ? Messages.Raw.Literal(ChooseSource)
+            : Messages.Raw.Literal(SwitchSource);
+
+    /// <inheritdoc cref="SwitchSourceLiteral"/>
+    internal static string SwitchSourceFor(string source) =>
+        string.Equals(source, Sources.UnconfiguredSource.SourceName, StringComparison.Ordinal) ? ChooseSource : SwitchSource;
+
+    /// <summary>
     /// Why a source runs out of band, in the clause each message builds its sentence around.
     /// </summary>
     /// <remarks>
@@ -50,7 +70,7 @@ internal static class OutOfBandSourceAdvice
             "configuration would reach kubectl rather than the service",
         "disabled" =>
             "a developer has switched it off in servicesources.local.json, so there is nothing local to configure",
-        "unconfigured" =>
+        Sources.UnconfiguredSource.SourceName =>
             "no source has been chosen for it, so nothing is running for it",
         _ => "it runs out of band",
     };
@@ -63,7 +83,7 @@ internal static class OutOfBandSourceAdvice
     internal static string ExpectedConfiguredWhere(string source) => source switch
     {
         "disabled" => "There is nowhere else to configure it while it stays disabled",
-        "unconfigured" => "There is nothing to configure until a source is chosen for it",
+        Sources.UnconfiguredSource.SourceName => "There is nothing to configure until a source is chosen for it",
         _ => "The service is expected to be configured wherever it actually runs",
     };
 
@@ -71,7 +91,7 @@ internal static class OutOfBandSourceAdvice
     internal static string ConfigureInsteadClause(string source) => source switch
     {
         "disabled" => "Drop the configuration",
-        "unconfigured" => "Drop the configuration until a source is chosen",
+        Sources.UnconfiguredSource.SourceName => "Drop the configuration until a source is chosen",
         _ => "Configure the service where it actually runs, drop the configuration",
     };
 

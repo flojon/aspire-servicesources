@@ -19,7 +19,8 @@ declares some other way.
 
 Named `"disabled"` rather than leaving `source` blank: a blank or absent `source` already means
 something else — the entry is not configured at all — and reports
-`'orders' has no source configured`. `"disabled"` is a deliberate, distinct choice.
+`'orders' has no source configured` (unless the AppHost called `UseInteractiveServiceConfiguration()`, which
+resolves it to a `Not configured` placeholder instead). `"disabled"` is a deliberate, distinct choice.
 
 Like [`"url"`](url.md), there is no real resource for Aspire to run, so the AppHost's own
 [`Configure` calls are skipped and logged](../guides/configuration.md#configuring-a-resolved-service), and a consumer's

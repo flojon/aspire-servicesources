@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,7 +24,7 @@ public class UnconfiguredServiceTests
         return dir;
     }
 
-    // CI is blanked unless a test says otherwise: these tests also run on CI, where it is set.
+    // The CI variables are blanked unless a test says otherwise: these tests also run on CI, where one is set.
     private static IDistributedApplicationBuilder Builder(
         string? ci = "", string? interactive = null, bool optIn = true)
     {
@@ -31,6 +32,8 @@ public class UnconfiguredServiceTests
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["CI"] = ci,
+            ["TF_BUILD"] = "",
+            ["JENKINS_URL"] = "",
             [InteractivePrompts.EnvironmentVariable] = interactive,
         });
 
@@ -199,6 +202,35 @@ public class UnconfiguredServiceTests
 
         Assert.Contains("No source has been chosen", ex.Message);
         Assert.DoesNotContain("WithHttpEndpoint", ex.Message);
+    }
+
+    [Fact]
+    public async Task ConfigurationCallsOnAPlaceholder_AreSkippedWithAWarning()
+    {
+        var builder = Builder();
+        var inventory = builder.AddService("inventory");
+
+        inventory.WithEnvironment("KEY", "value");
+        inventory.Unwrap<ProjectResource>(_ => throw new InvalidOperationException("must not run"));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Contains(warnings, w => w.Contains("WithEnvironment") && w.Contains("inventory"));
+        Assert.Contains(warnings, w => w.Contains("Unwrap<ProjectResource>"));
+    }
+
+    [Fact]
+    public void AnEntryWithABlankSource_ResolvesToAPlaceholder()
+    {
+        var builder = Builder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [$"{DeveloperConfiguration.ServicesKey}:inventory:source"] = "",
+        });
+
+        builder.AddService("inventory");
+
+        Assert.Single(builder.Resources.OfType<UnconfiguredServiceResource>());
     }
 
     [Fact]

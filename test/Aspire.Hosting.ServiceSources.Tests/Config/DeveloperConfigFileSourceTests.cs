@@ -195,7 +195,7 @@ public class DeveloperConfigFileSourceTests
         var sourcesAfterTheFirstRegistration = builder.Configuration.Sources.Count;
 
         builder.AddLocalKind($"{KindUnderTest}-2", new FakeKind());
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal(sourcesAfterTheFirstRegistration, builder.Configuration.Sources.Count);
         Assert.Equal("repository", builder.Configuration[SourceKey]);

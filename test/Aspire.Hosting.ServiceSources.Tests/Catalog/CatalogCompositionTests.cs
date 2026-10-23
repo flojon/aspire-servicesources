@@ -28,7 +28,7 @@ public class CatalogCompositionTests
 
         builder.AddServiceCatalog(c => c.AddService("inventory").WithUrl("https://example.com"));
 
-        var (definition, _) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+        var (definition, _) = ResolveServiceStrict.For(builder, "inventory");
 
         Assert.Equal("https://example.com", definition.Url!.Url);
     }
@@ -47,7 +47,7 @@ public class CatalogCompositionTests
         // No servicesources.local.json at all -- this is the whole point of #158.
         var builder = CreateBuilder(dir);
 
-        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+        var (definition, devConfig) = ResolveServiceStrict.For(builder, "inventory");
 
         Assert.Equal("https://example.com", definition.Url!.Url);
         Assert.Equal("url", devConfig.Source);
@@ -74,7 +74,7 @@ public class CatalogCompositionTests
         // No servicesources.local.json at all -- the whole point of the "close to free" claim.
         var builder = CreateBuilder(dir);
 
-        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (definition, devConfig) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("services/orders", definition.Path);
         Assert.Equal("path", devConfig.Source);
@@ -101,7 +101,7 @@ public class CatalogCompositionTests
             """{ "services": { "orders": { "source": "path" } } }""");
         var builder = CreateBuilder(dir);
 
-        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (definition, devConfig) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("path", devConfig.Source);
         Assert.Equal("https://github.com/company/orders", definition.Repository.Url);
@@ -127,7 +127,7 @@ public class CatalogCompositionTests
             """{ "services": { "inventory": { "source": "url" } } }""");
         var builder = CreateBuilder(dir);
 
-        var (_, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+        var (_, devConfig) = ResolveServiceStrict.For(builder, "inventory");
 
         Assert.Equal("url", devConfig.Source);
         Assert.DoesNotContain("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
@@ -153,7 +153,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "inventory"));
+            () => ResolveServiceStrict.For(builder, "inventory"));
 
         Assert.Contains("inventory", ex.Message, StringComparison.Ordinal);
         Assert.Contains("has no source configured", ex.Message, StringComparison.Ordinal);
@@ -183,7 +183,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "payments"));
+            () => ResolveServiceStrict.For(builder, "payments"));
 
         Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
         Assert.Contains("has no source configured", ex.Message, StringComparison.Ordinal);
@@ -205,7 +205,7 @@ public class CatalogCompositionTests
             """{ "services": { "inventory": { "source": "url" } } }""");
         var builder = CreateBuilder(dir);
 
-        var (definition, _) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+        var (definition, _) = ResolveServiceStrict.For(builder, "inventory");
 
         Assert.Equal("https://example.com", definition.Url!.Url);
     }
@@ -226,8 +226,8 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
         builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
 
-        var (yamlDef, _) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
-        var (codeDef, _) = ServiceSourcesConfigCache.ResolveService(builder, "payments");
+        var (yamlDef, _) = ResolveServiceStrict.For(builder, "inventory");
+        var (codeDef, _) = ResolveServiceStrict.For(builder, "payments");
 
         Assert.Equal("https://example.com", yamlDef.Url!.Url);
         Assert.Equal("https://payments.example", codeDef.Url!.Url);
@@ -255,8 +255,8 @@ public class CatalogCompositionTests
             { "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "billing");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "billing");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
@@ -294,8 +294,8 @@ public class CatalogCompositionTests
             { "services": { "orders": { "source": "kubernetes" }, "billing": { "source": "kubernetes" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "billing");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "billing");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
@@ -318,7 +318,7 @@ public class CatalogCompositionTests
         builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://other.example"));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "payments"));
+            () => ResolveServiceStrict.For(builder, "payments"));
 
         Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
         Assert.Contains("code", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -340,7 +340,7 @@ public class CatalogCompositionTests
         builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://other.example"));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "payments"));
+            () => ResolveServiceStrict.For(builder, "payments"));
 
         Assert.DoesNotContain("declares more than once", ex.Message, StringComparison.Ordinal);
         Assert.Contains("payments", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -367,7 +367,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("declares more than once", ex.Message, StringComparison.Ordinal);
     }
@@ -405,7 +405,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("defaultSource", ex.Message, StringComparison.Ordinal);
@@ -446,7 +446,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("declares more than once", ex.Message, StringComparison.Ordinal);
     }
@@ -467,7 +467,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "Orders"));
+            () => ResolveServiceStrict.For(builder, "Orders"));
 
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -479,7 +479,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "anything"));
+            () => ResolveServiceStrict.For(builder, "anything"));
 
         Assert.Contains("servicesources.yaml", ex.Message, StringComparison.Ordinal);
         Assert.Contains("AddServiceCatalog", ex.Message, StringComparison.Ordinal);
@@ -508,7 +508,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'orders'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ungrouped service", ex.Message, StringComparison.Ordinal);
@@ -542,7 +542,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'monorepo'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'Monorepo'", ex.Message, StringComparison.Ordinal);
@@ -573,7 +573,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'orders'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'Orders'", ex.Message, StringComparison.Ordinal);
@@ -603,7 +603,7 @@ public class CatalogCompositionTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'shared'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("twice", ex.Message, StringComparison.Ordinal);
@@ -639,7 +639,7 @@ public class CatalogCompositionTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'shared'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'Shared'", ex.Message, StringComparison.Ordinal);
@@ -684,9 +684,9 @@ public class CatalogCompositionTests
             c.AddService("payments").WithSharedRepository(repository).WithProject("Payments.csproj");
         });
 
-        var (ordersDef, _) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        var (paymentsDef, _) = ServiceSourcesConfigCache.ResolveService(builder, "payments");
-        var (billingDef, _) = ServiceSourcesConfigCache.ResolveService(builder, "billing");
+        var (ordersDef, _) = ResolveServiceStrict.For(builder, "orders");
+        var (paymentsDef, _) = ResolveServiceStrict.For(builder, "payments");
+        var (billingDef, _) = ResolveServiceStrict.For(builder, "billing");
 
         // The code catalog's own two services share one repository instance...
         Assert.Same(ordersDef.Repository, paymentsDef.Repository);
@@ -721,7 +721,7 @@ public class CatalogCompositionTests
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
         // Any resolution reaches LoadedConfig.Load, where the notice is buffered.
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ResolveServiceStrict.For(builder, "orders");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
@@ -771,8 +771,8 @@ public class CatalogCompositionTests
             { "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "billing");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "billing");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
