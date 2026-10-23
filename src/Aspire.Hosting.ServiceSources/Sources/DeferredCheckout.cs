@@ -169,7 +169,7 @@ internal sealed class DeferredCheckout
         private readonly HashSet<ResourceCommandAnnotation> _gatedCommands = [];
 
         /// <summary>
-        /// Wraps the dashboard's Start, Stop and Restart so they match <see cref="Gate"/>. Aspire adds
+        /// Wraps the dashboard's Start, Stop, Restart and Rebuild so they match <see cref="Gate"/>. Aspire adds
         /// those commands when DCP creates the resource, so this runs only after DCP has withheld it.
         /// </summary>
         public void GateLifecycleCommands()
@@ -1882,18 +1882,25 @@ internal static class StartGates
         command == KnownResourceCommands.StartCommand ? RefusalFor(deferred) : NotRunningFor(deferred, command);
 
     /// <summary>
-    /// The reason Stop or Restart has nothing to act on, or <see langword="null"/> for Start and for a
-    /// service that is startable. The CLI and API run these regardless of the state the dashboard shows,
-    /// and DCP answers a resource it never created with a raw 404.
+    /// The reason Stop, Restart or Rebuild has nothing to act on, or <see langword="null"/> for Start and
+    /// for a service that is startable. The CLI and API run these regardless of the state the dashboard
+    /// shows, and DCP answers a resource it never created with a raw 404. Rebuild would also start the
+    /// service through the orchestrator, past the Start command, and paint it <c>FailedToStart</c>.
     /// </summary>
     public static Raw? NotRunningFor(DeferredCheckout.Deferred deferred, string command)
     {
-        if (command != KnownResourceCommands.StopCommand && command != KnownResourceCommands.RestartCommand)
+        var pastTense =
+            command == KnownResourceCommands.StopCommand ? "stopped"
+            : command == KnownResourceCommands.RestartCommand ? "restarted"
+            : command == KnownResourceCommands.RebuildCommand ? "rebuilt"
+            : null;
+
+        if (pastTense is null)
         {
             return null;
         }
 
-        var past = Raw.Display(command == KnownResourceCommands.StopCommand ? "stopped" : "restarted");
+        var past = Raw.Display(pastTense);
         var name = new Name(deferred.ServiceName);
 
         return deferred.Gate switch
@@ -1919,7 +1926,7 @@ internal static class StartGates
     /// <summary>
     /// The state of a lifecycle command for a service that is not yet startable. Start stays available
     /// where it can say why it is refused, Stop is hidden because nothing is running to stop, and
-    /// Restart is disabled.
+    /// Restart and Rebuild are disabled.
     /// </summary>
     public static ResourceCommandState CommandState(
         DeferredCheckout.Deferred deferred, ResourceCommandAnnotation original, UpdateCommandStateContext context)
@@ -1945,5 +1952,6 @@ internal static class StartGates
     public static bool IsLifecycleCommand(string name) =>
         name == KnownResourceCommands.StartCommand
         || name == KnownResourceCommands.StopCommand
-        || name == KnownResourceCommands.RestartCommand;
+        || name == KnownResourceCommands.RestartCommand
+        || name == KnownResourceCommands.RebuildCommand;
 }
