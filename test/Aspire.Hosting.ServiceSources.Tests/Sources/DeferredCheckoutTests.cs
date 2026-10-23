@@ -941,6 +941,7 @@ public class DeferredCheckoutTests
             (KnownResourceCommands.StartCommand, ResourceCommandState.Hidden),
             (KnownResourceCommands.StopCommand, ResourceCommandState.Enabled),
             (KnownResourceCommands.RestartCommand, ResourceCommandState.Enabled),
+            (KnownResourceCommands.RebuildCommand, ResourceCommandState.Enabled),
         })
         {
             RealResource(builder, "orders").Annotations.Add(new ResourceCommandAnnotation(
@@ -963,11 +964,12 @@ public class DeferredCheckoutTests
         Assert.DoesNotContain(@"\\", refusal.Message, StringComparison.Ordinal);
         Assert.Contains("restart the AppHost", refusal.Message, StringComparison.Ordinal);
 
-        await AssertStopAndRestartRefusedAsync(
+        await AssertStopRestartAndRebuildRefusedAsync(
             RealResource(builder, "orders"), services, Path.Combine(".servicesources", "selection.json"));
         Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StartCommand, services));
         Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StopCommand, services));
         Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.RestartCommand, services));
+        Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.RebuildCommand, services));
     }
 
     [Fact]
@@ -2013,6 +2015,231 @@ public class DeferredCheckoutTests
         await TasksAsync(builder);
     }
 
+    private const string SourcePickStage = "source pick";
+
+    private const string CheckingOutStage = "checking out";
+
+    /// <remarks>
+    /// The refusal says the service starts by itself once the dialog is answered, which only holds
+    /// if the refused Start leaves it in a state the package still recognises as withheld.
+    /// </remarks>
+    [Fact]
+    public async Task AStartRefusedWhileTheSourcePickIsOpen_StillStartsOnceItIsAnswered()
+    {
+        await using var scenario = await RefusedStartScenario.CreateAsync(SourcePickStage, KnownResourceStates.Finished);
+
+        var refusal = await scenario.StartAsync();
+
+        Assert.False(refusal.Success);
+        Assert.Contains("not ready yet", refusal.Message, StringComparison.Ordinal);
+        Assert.StartsWith(SourcePrompt.AwaitingStatePrefix, CurrentState(scenario.Services, scenario.Orders), StringComparison.Ordinal);
+
+        scenario.Release();
+
+        await scenario.Started.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(KnownResourceStates.Finished, CurrentState(scenario.Services, scenario.Orders));
+    }
+
+    /// <remarks>
+    /// Aspire adds the lifecycle commands only when DCP creates the resource, so a Start can reach
+    /// DCP unwrapped and leave <c>FailedToStart</c> where the package expects <c>NotStarted</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData(SourcePickStage)]
+    [InlineData(CheckingOutStage)]
+    public async Task AStartThatReachedDcpBeforeTheCommandsWereGated_StillStartsOnceReleased(string stage)
+    {
+        await using var scenario = await RefusedStartScenario.CreateAsync(
+            stage, KnownResourceStates.Finished, startReachesDcpFirst: true);
+
+        scenario.Release();
+
+        await scenario.Started.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(KnownResourceStates.Finished, CurrentState(scenario.Services, scenario.Orders));
+    }
+
+    /// <remarks>
+    /// Aspire's waits give up on a dependency the moment it reports <c>FailedToStart</c>, so a
+    /// refused Start that left that state behind would fail everything waiting on the service.
+    /// Rebuild ends in a start through the orchestrator, past the Start command, so it needs the same gate.
+    /// </remarks>
+    [Theory]
+    [InlineData(SourcePickStage, WaitType.WaitForCompletion, false)]
+    [InlineData(SourcePickStage, WaitType.WaitUntilHealthy, false)]
+    [InlineData(CheckingOutStage, WaitType.WaitForCompletion, false)]
+    [InlineData(CheckingOutStage, WaitType.WaitUntilHealthy, false)]
+    [InlineData(SourcePickStage, WaitType.WaitForCompletion, true)]
+    [InlineData(CheckingOutStage, WaitType.WaitUntilHealthy, true)]
+    public async Task ACommandRefusedBeforeTheServiceIsReady_DoesNotFailWhatWaitsOnIt(
+        string stage, WaitType waitType, bool rebuild)
+    {
+        var completion = waitType == WaitType.WaitForCompletion;
+        await using var scenario = await RefusedStartScenario.CreateAsync(
+            stage, completion ? KnownResourceStates.Finished : KnownResourceStates.Running);
+
+        var waiter = new Waiter();
+        waiter.Annotations.Add(new WaitAnnotation(scenario.Orders, waitType)
+        {
+            WaitBehavior = WaitBehavior.StopOnResourceUnavailable,
+        });
+        var waiting = scenario.Services.GetRequiredService<ResourceNotificationService>()
+            .WaitForDependenciesAsync(waiter, scenario.Stopping);
+
+        var refusal = await scenario.ExecuteAsync(
+            rebuild ? KnownResourceCommands.RebuildCommand : KnownResourceCommands.StartCommand);
+        Assert.False(refusal.Success);
+        Assert.NotEqual(KnownResourceStates.FailedToStart, CurrentState(scenario.Services, scenario.Orders));
+
+        scenario.Release();
+        await scenario.Started.WaitAsync(TimeSpan.FromSeconds(30));
+
+        if (completion)
+        {
+            await waiting.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        else
+        {
+            // Past Running, a healthy wait needs a ResourceReadyEvent only the real orchestrator raises.
+            await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(500)));
+            Assert.False(waiting.IsFaulted, waiting.Exception?.InnerException?.Message);
+        }
+    }
+
+    private sealed class Waiter() : Resource("waiter");
+
+    /// <summary>
+    /// A deferred service held at <paramref name="stage"/>, with a Start command that stands in for
+    /// DCP's: it raises <c>BeforeResourceStartedEvent</c>, and a handler that throws leaves the
+    /// resource <c>FailedToStart</c> exactly as <c>DcpExecutor.StartResourceAsync</c> does.
+    /// </summary>
+    private sealed class RefusedStartScenario : IAsyncDisposable
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly ManualResetEventSlim _release = new(false);
+
+        private ManualResetEventSlim? _releaseClone;
+
+        private IDistributedApplicationBuilder _builder = null!;
+
+        public IServiceProvider Services { get; private set; } = null!;
+
+        public IResource Orders { get; private set; } = null!;
+
+        public Task Started => _started.Task;
+
+        public CancellationToken Stopping => Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
+
+        public static async Task<RefusedStartScenario> CreateAsync(
+            string stage, string startedState, bool startReachesDcpFirst = false)
+        {
+            var scenario = new RefusedStartScenario();
+            var dir = CreateAppHostDirectory("orders");
+            var interaction = new FakeInteractionService { IsAvailable = true };
+            var git = new FakeGitClient();
+            var builder = scenario._builder = PromptBuilder(dir, interaction);
+
+            if (stage == SourcePickStage)
+            {
+                interaction.Answer = inputs =>
+                {
+                    scenario._release.Wait(TimeSpan.FromSeconds(30));
+                    return Checked(inputs, true);
+                };
+            }
+            else
+            {
+                PlantSelection(dir, """{ "version": 1, "services": { "orders": { "start": true } } }""");
+                scenario._releaseClone = git.BlockFor(OrdersUrl);
+            }
+
+            new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+            var orders = scenario.Orders = RealResource(builder, "orders");
+            var dcpStart = new ResourceCommandAnnotation(
+                KnownResourceCommands.StartCommand, KnownResourceCommands.StartCommand, _ => ResourceCommandState.Enabled,
+                context => scenario.DcpStartAsync(context, startedState),
+                null, null, null, null, null, false);
+            orders.Annotations.Add(dcpStart);
+            orders.Annotations.Add(new ResourceCommandAnnotation(
+                KnownResourceCommands.RebuildCommand, KnownResourceCommands.RebuildCommand, _ => ResourceCommandState.Enabled,
+                context => scenario.DcpStartAsync(context, startedState),
+                null, null, null, null, null, false));
+
+            if (startReachesDcpFirst)
+            {
+                // No NotStarted: the refused Start's FailedToStart is all the package sees.
+                var services = scenario.Services = builder.Services.BuildServiceProvider();
+                await builder.Eventing.PublishAsync(
+                    new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+                var early = await ExecuteOf(dcpStart, orders, services);
+                Assert.False(early.Success);
+                Assert.Equal(KnownResourceStates.FailedToStart, CurrentState(services, orders));
+            }
+            else
+            {
+                scenario.Services = await RunGateAsync(builder, "orders");
+            }
+
+            var held = stage == SourcePickStage ? SourcePrompt.AwaitingStatePrefix : "Checking out";
+            AssertWaitsFor(
+                () => CurrentState(scenario.Services, orders)?.StartsWith(held, StringComparison.Ordinal) == true,
+                $"the service never reached '{held}'.");
+
+            return scenario;
+        }
+
+        /// <summary>A Start sent the way the CLI and the dashboard send it.</summary>
+        public Task<ExecuteCommandResult> StartAsync() => ExecuteAsync(KnownResourceCommands.StartCommand);
+
+        /// <summary>A command sent the way the CLI and the dashboard send it.</summary>
+        public Task<ExecuteCommandResult> ExecuteAsync(string command) =>
+            Services.GetRequiredService<ResourceCommandService>().ExecuteCommandAsync(Orders, command);
+
+        /// <summary>Answers the dialog with the service checked, or lets the clone finish.</summary>
+        public void Release()
+        {
+            _release.Set();
+            _releaseClone?.Set();
+        }
+
+        private async Task<ExecuteCommandResult> DcpStartAsync(ExecuteCommandContext context, string startedState)
+        {
+            var notifications = context.Services.GetRequiredService<ResourceNotificationService>();
+
+            try
+            {
+                await _builder.Eventing.PublishAsync(
+                    new BeforeResourceStartedEvent(Orders, context.Services), context.CancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await notifications.PublishUpdateAsync(Orders, snapshot => snapshot with
+                {
+                    State = new ResourceStateSnapshot(KnownResourceStates.FailedToStart, KnownResourceStateStyles.Error),
+                });
+
+                return new ExecuteCommandResult { Success = false, Message = ex.Message };
+            }
+
+            await notifications.PublishUpdateAsync(Orders, snapshot => snapshot with
+            {
+                State = new ResourceStateSnapshot(startedState, null),
+                ExitCode = startedState == KnownResourceStates.Finished ? 0 : null,
+            });
+
+            _started.TrySetResult();
+            return new ExecuteCommandResult { Success = true };
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Release();
+            Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+            await TasksAsync(_builder);
+        }
+    }
+
     [Fact]
     public async Task AnAnswerArrivingBeforeNotStarted_LeavesNoAwaitingStateBehind()
     {
@@ -2420,9 +2647,13 @@ public class DeferredCheckoutTests
                 Services = services,
             });
 
-    private static async Task<ExecuteCommandResult> ExecuteOf(
+    private static Task<ExecuteCommandResult> ExecuteOf(
         IResource resource, string command, IServiceProvider services) =>
-        await Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+        ExecuteOf(Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command), resource, services);
+
+    private static async Task<ExecuteCommandResult> ExecuteOf(
+        ResourceCommandAnnotation command, IResource resource, IServiceProvider services) =>
+        await command
             .ExecuteCommand(new ExecuteCommandContext
             {
                 Services = services,
@@ -2432,11 +2663,14 @@ public class DeferredCheckoutTests
                 Arguments = new InteractionInputCollection([]),
             });
 
-    /// <summary>The CLI and API run Stop and Restart whatever the dashboard shows; DCP would answer them with a 404.</summary>
-    private static async Task AssertStopAndRestartRefusedAsync(
+    /// <summary>The CLI and API run Stop, Restart and Rebuild whatever the dashboard shows; DCP would answer them with a 404.</summary>
+    private static async Task AssertStopRestartAndRebuildRefusedAsync(
         IResource resource, IServiceProvider services, string reason)
     {
-        foreach (var command in new[] { KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand })
+        foreach (var command in new[]
+        {
+            KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand, KnownResourceCommands.RebuildCommand,
+        })
         {
             var result = await ExecuteOf(resource, command, services);
 

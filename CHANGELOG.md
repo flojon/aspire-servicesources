@@ -120,9 +120,11 @@ never existed. Check the tag of the last release before adding one.
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
 
-  Until a deferred service is ready, `aspire resource <name> start`, `stop` and `restart` are refused
+  Until a deferred service is ready, `aspire resource <name> start`, `stop`, `restart` and `rebuild` are refused
   with a message saying why ([#473], [#480]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
-  enabled on a `Skipped` service to show that message.
+  enabled on a `Skipped` service to show that message. A Start or Rebuild refused while the service is still
+  on its way leaves it as it was: it still starts by itself once ready, and anything that
+  `WaitFor`s or `WaitForCompletion`s it keeps waiting instead of failing.
 
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
   the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
