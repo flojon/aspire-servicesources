@@ -32,7 +32,7 @@ public static class ServiceSourcesBuilderExtensions
     /// independent registrations, while these six names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
-    private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
         ["repository"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),

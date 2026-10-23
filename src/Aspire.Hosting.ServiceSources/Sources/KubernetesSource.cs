@@ -44,6 +44,9 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Kubernetes is null ? null : typeof(ServiceExecutableResource);
 
+    public bool IsOfferedFor(ServiceDefinition definition) =>
+        !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
+
     internal static string[] BuildPortForwardArgs(
         string serviceName,
         ServiceDefinition definition,
