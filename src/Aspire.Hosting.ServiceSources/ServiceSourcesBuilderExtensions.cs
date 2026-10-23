@@ -96,12 +96,27 @@ public static class ServiceSourcesBuilderExtensions
         // hear about an unrelated entry nothing else names.
         ServiceConfigAudit.EnsureSubscribed(builder);
 
-        var (definition, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
+        var (definition, developerConfig, notConfigured) =
+            ServiceSourcesConfigCache.ResolveServiceOrNotConfigured(builder, name);
+
+        if (developerConfig is null)
+        {
+            // Strict mode is the behaviour before the opt-in existed: the same exception, unchanged.
+            if (!InteractiveServiceConfiguration.IsEnabled(builder))
+            {
+                throw notConfigured!;
+            }
+
+            // The dashboard Reason stays short; the full text keeps the near-miss hints for a typo'd key.
+            ServiceSourcesWarnings.For(builder).AddNotice(Raw.Cause(notConfigured!));
+
+            return UnconfiguredSource.Resolve(builder, name);
+        }
 
         // Resolved once here rather than inside each source: the source that actually reads it
         // must not depend on ServiceSourcesConfigCache.LoadedFor by itself, which would tie its unit
-        // tests to the whole catalog-loading pipeline that ResolveService just walked above. This is
-        // a cache hit off the same instance ResolveService populated.
+        // tests to the whole catalog-loading pipeline that ResolveServiceOrNotConfigured just walked above. This is
+        // a cache hit off the same instance ResolveServiceOrNotConfigured populated.
         var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
             .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
 
@@ -128,7 +143,7 @@ public static class ServiceSourcesBuilderExtensions
             // Names the alternatives rather than saying "not implemented yet": the lookup folds
             // case, so reaching here means the name itself is unknown — not that the source exists
             // under a different spelling, which is what the old wording sent readers looking for.
-            // An entry with no source at all never arrives here; ResolveService reports that
+            // An entry with no source at all never arrives here; ResolveServiceOrNotConfigured reports that
             // separately, against the key that would set it.
             var known = Raw.Join(", ", Sources.Keys.Order(StringComparer.Ordinal).Select(s => Raw.Compose($"'{new Name(s)}'")));
 
@@ -277,6 +292,35 @@ public static class ServiceSourcesBuilderExtensions
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder) =>
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+    /// <summary>
+    /// Lets a service no configuration layer gave a source resolve to a placeholder instead of
+    /// throwing, so the AppHost reaches the dashboard. The placeholder starts nothing, has no
+    /// endpoints and shows <c>Not configured</c>.
+    /// </summary>
+    /// <remarks>
+    /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>,
+    /// <c>TF_BUILD</c> or <c>JENKINS_URL</c> environment variable is set (other than to <c>false</c> or <c>0</c>), so a committed call does
+    /// not weaken CI, and in publish mode. The same <c>SERVICESOURCES_INTERACTIVE</c> setting that
+    /// governs the source-pick prompt overrides the <c>CI</c> check once this has been called:
+    /// <c>true</c> forces it on, <c>false</c> restores the exception. Without this call nothing
+    /// changes.
+    /// <para>
+    /// Calls that need an endpoint or a concrete resource type still throw on a placeholder, with a
+    /// message saying no source has been chosen: <c>GetServiceEndpoint()</c> and the type-returning
+    /// <c>Unwrap&lt;T&gt;()</c>. An AppHost that makes either call on such a service can still stop before
+    /// the dashboard. Configuration calls such as <c>WithEnvironment</c> only warn.
+    /// </para>
+    /// </remarks>
+    [AspireExport]
+    public static IDistributedApplicationBuilder UseInteractiveServiceConfiguration(
+        this IDistributedApplicationBuilder builder)
+    {
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        InteractiveServiceConfiguration.OptIn(builder);
+        return builder;
+    }
 
     /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose

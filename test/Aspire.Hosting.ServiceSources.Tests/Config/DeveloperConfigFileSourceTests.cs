@@ -78,6 +78,16 @@ public class DeveloperConfigFileSourceTests
         Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
+    [Fact]
+    public void UseInteractiveServiceConfiguration_MakesTheFileReadableThroughTheAppHostsOwnConfiguration()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory());
+
+        builder.UseInteractiveServiceConfiguration();
+
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
+    }
+
     /// <summary>
     /// The catalog-in-code entry point — declares no yaml at all, so it is as likely as
     /// <c>AddBackingService</c> to be an AppHost's first line, which is where a source-dependent
@@ -185,7 +195,7 @@ public class DeveloperConfigFileSourceTests
         var sourcesAfterTheFirstRegistration = builder.Configuration.Sources.Count;
 
         builder.AddLocalKind($"{KindUnderTest}-2", new FakeKind());
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal(sourcesAfterTheFirstRegistration, builder.Configuration.Sources.Count);
         Assert.Equal("repository", builder.Configuration[SourceKey]);
@@ -247,7 +257,7 @@ public class DeveloperConfigFileSourceTests
         string[] accountedFor =
         [
             "AddBackingService", "AddLocalKind", "AddService", "AddServiceCatalog", "SetCheckoutTiming",
-            "UseDeferredCheckout", "UseJava", "UseJavaScript",
+            "UseDeferredCheckout", "UseInteractiveServiceConfiguration", "UseJava", "UseJavaScript",
         ];
 
         var entryPoints = typeof(ServiceSourcesBuilderExtensions).Assembly.GetExportedTypes()

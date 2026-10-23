@@ -106,7 +106,7 @@ internal static class ServiceSourcesConfigCache
     /// <c>"local"</c> — when nothing configures it.
     /// </summary>
     /// <remarks>
-    /// Unconfigured is the default rather than an error, unlike <see cref="ResolveService"/>: a
+    /// Unconfigured is the default rather than an error, unlike <see cref="ResolveServiceOrNotConfigured"/>: a
     /// backing service with no entry runs from the factory the AppHost passed to
     /// <c>AddBackingService</c>, which is what an AppHost nobody has pointed at a cluster does for
     /// every one of them. There is nothing for the developer to fix, so there is nothing to report.
@@ -130,7 +130,13 @@ internal static class ServiceSourcesConfigCache
                 new ConfigLoader<IReadOnlyDictionary<string, BackingServiceDeveloperConfig>>())
             .Load(builder, DeveloperConfiguration.ReadBackingServicesFrom);
 
-    public static (ServiceDefinition Definition, ServiceDeveloperConfig DeveloperConfig) ResolveService(
+    /// <summary>
+    /// Resolves a declared service's definition and developer config. The one failure a developer can
+    /// fix by answering a question — a declared service no configuration layer gave a source — is
+    /// returned rather than thrown. A service the catalog does not declare still throws: that is the AppHost's mistake.
+    /// </summary>
+    public static (ServiceDefinition Definition, ServiceDeveloperConfig? DeveloperConfig,
+        ServiceSourcesConfigurationException? NotConfigured) ResolveServiceOrNotConfigured(
         IDistributedApplicationBuilder builder, string serviceName)
     {
         var loaded = LoadedFor(builder);
@@ -143,7 +149,7 @@ internal static class ServiceSourcesConfigCache
 
         if (!loaded.DeveloperConfig.Services.TryGetValue(serviceName, out var developerConfig))
         {
-            throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
+            return (definition, null, loaded.DeveloperConfig.NotConfiguredError(serviceName));
         }
 
         // An entry with a blank source is an entry with no source. It arrives that way from an
@@ -153,10 +159,10 @@ internal static class ServiceSourcesConfigCache
         // recognise, so it takes the same route as an entry that is absent altogether.
         if (string.IsNullOrWhiteSpace(developerConfig.Source))
         {
-            throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
+            return (definition, null, loaded.DeveloperConfig.NotConfiguredError(serviceName));
         }
 
-        return (definition, developerConfig);
+        return (definition, developerConfig, null);
     }
 
     /// <summary>

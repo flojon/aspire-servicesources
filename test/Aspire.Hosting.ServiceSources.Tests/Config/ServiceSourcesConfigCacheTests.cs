@@ -41,7 +41,7 @@ public class ServiceSourcesConfigCacheTests
 
         var builder = CreateBuilder(dir);
 
-        var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (metadata, developerConfig) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("https://github.com/company/orders", metadata.Repository.Url);
         Assert.Equal("repository", developerConfig.Source);
@@ -57,7 +57,7 @@ public class ServiceSourcesConfigCacheTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -81,7 +81,7 @@ public class ServiceSourcesConfigCacheTests
         builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -103,7 +103,7 @@ public class ServiceSourcesConfigCacheTests
         builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "shipping"));
+            () => ResolveServiceStrict.For(builder, "shipping"));
 
         Assert.Contains("shipping", ex.Message);
         Assert.Contains("code", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -125,7 +125,7 @@ public class ServiceSourcesConfigCacheTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("servicesources.local.json", ex.Message);
@@ -307,8 +307,8 @@ public class ServiceSourcesConfigCacheTests
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), JsonWithGroupDir(GroupedLocalJson, groupDir));
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "basket");
 
         Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
     }
@@ -326,8 +326,8 @@ public class ServiceSourcesConfigCacheTests
             c.AddService("orders").WithSharedRepository(repository).WithProject("src/Orders/Orders.csproj");
             c.AddService("basket").WithSharedRepository(repository).WithProject("src/Basket/Basket.csproj");
         });
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "basket");
 
         Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
     }
@@ -347,8 +347,8 @@ public class ServiceSourcesConfigCacheTests
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), UngroupedLocalJson);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
-        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+        ResolveServiceStrict.For(builder, "orders");
+        ResolveServiceStrict.For(builder, "basket");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 

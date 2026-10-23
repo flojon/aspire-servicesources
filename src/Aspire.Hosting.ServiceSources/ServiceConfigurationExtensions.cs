@@ -39,7 +39,7 @@ public static class ServiceConfigurationExtensions
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The resolved resource is not a <typeparamref name="T"/>, or <typeparamref name="T"/> cannot
     /// reach the service behind an out-of-band source (<c>"url"</c>, <c>"kubernetes"</c>,
-    /// <c>"disabled"</c>) — see <see cref="IsUnreachable{T}"/> for the one capability that still can.
+    /// <c>"disabled"</c>, or the placeholder for a service nobody chose a source for) — see <see cref="IsUnreachable{T}"/> for the one capability that still can.
     /// </exception>
     [AspireExportIgnore(Reason =
         "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
@@ -90,7 +90,8 @@ public static class ServiceConfigurationExtensions
     /// back. This overload has somewhere else to put that case — <paramref name="configure"/> simply
     /// never runs, and <paramref name="service"/> comes back unchanged — the same shape a developer
     /// switching a service to <c>"url"</c>, <c>"kubernetes"</c> or <c>"disabled"</c> in their own
-    /// <c>servicesources.local.json</c> already gets from <c>WithEnvironment</c>, <c>WithArgs</c> and
+    /// <c>servicesources.local.json</c> — or leaving it unconfigured under
+    /// <see cref="ServiceSourcesBuilderExtensions.UseInteractiveServiceConfiguration"/> — already gets from <c>WithEnvironment</c>, <c>WithArgs</c> and
     /// the rest. Prefer this over the type-returning overload whenever the call site does not need to
     /// keep the unwrapped builder afterwards, so that switch does not break a <c>Program.cs</c> it
     /// wasn't meant to.
@@ -246,7 +247,7 @@ public static class ServiceConfigurationExtensions
                 $"{opening}: its source is '{new Name(source)}' — "
                 + $"{Raw.Escaped(OutOfBandSourceAdvice.SourceDetail(source))}. "
                 + $"{Raw.Escaped(OutOfBandSourceAdvice.ConfigureInsteadClause(source))}, or "
-                + $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+                + $"{OutOfBandSourceAdvice.SwitchSourceLiteral(source)}.");
         }
 
         return Raw.Compose($"{opening}: {ResolvedAs<T>(source, real ?? resource)}.");

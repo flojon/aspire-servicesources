@@ -61,7 +61,7 @@ public class CatalogErrorMessageTests
             var dir = TempDirectories.CreateSubdirectory().FullName;
             var builder = CreateBuilder(dir);
             builder.AddServiceCatalog(c => c.AddService("orders").WithUrl("https://example.com"));
-            ServiceSourcesConfigCache.ResolveService(builder, "typo'd-name");
+            ResolveServiceStrict.For(builder, "typo'd-name");
         });
 
     [Fact]
@@ -75,7 +75,7 @@ public class CatalogErrorMessageTests
             // WithContainer requires image and port at the call site, so this exercises the case
             // where the entry declares no container block at all but is resolved as one.
             builder.AddServiceCatalog(c => c.AddService("svc").WithUrl("https://example.com"));
-            var (definition, config) = ServiceSourcesConfigCache.ResolveService(builder, "svc");
+            var (definition, config) = ResolveServiceStrict.For(builder, "svc");
             Aspire.Hosting.ServiceSources.Sources.ContainerSource.ResolveContainerConfig("svc", definition, config);
         });
 
@@ -85,13 +85,13 @@ public class CatalogErrorMessageTests
         {
             var dir = TempDirectories.CreateSubdirectory().FullName;
             // A developer selection is required to reach KubernetesSource at all — an entry with no
-            // 'source' fails at ResolveService's own NotConfiguredError first, which never mentions
+            // 'source' fails at ResolveServiceOrNotConfigured's own NotConfiguredError first, which never mentions
             // servicesources.yaml either way but also never exercises the code this test targets.
             File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
                 """{ "services": { "svc": { "source": "kubernetes" } } }""");
             var builder = CreateBuilder(dir);
             builder.AddServiceCatalog(c => c.AddService("svc").WithUrl("https://example.com"));
-            var (definition, config) = ServiceSourcesConfigCache.ResolveService(builder, "svc");
+            var (definition, config) = ResolveServiceStrict.For(builder, "svc");
             Aspire.Hosting.ServiceSources.Sources.KubernetesSource.BuildPortForwardArgs(
                 "svc", definition, config, new Aspire.Hosting.ServiceSources.PortAllocation.SocketPortAllocator(),
                 out _, out _);
@@ -108,7 +108,7 @@ public class CatalogErrorMessageTests
                 """{ "services": { "svc": { "source": "url" } } }""");
             var builder = CreateBuilder(dir);
             builder.AddServiceCatalog(c => c.AddService("svc").WithContainer("nginx", 80));
-            var (definition, config) = ServiceSourcesConfigCache.ResolveService(builder, "svc");
+            var (definition, config) = ResolveServiceStrict.For(builder, "svc");
             Aspire.Hosting.ServiceSources.Sources.UrlSource.ResolveUrl("svc", definition, config);
         });
 
@@ -148,7 +148,7 @@ public class CatalogErrorMessageTests
             builder.AddServiceCatalog(c => c.AddService("svc")
                 .WithRepository("https://github.com/example/repo")
                 .WithKind("nonexistent-kind"));
-            var (definition, config) = ServiceSourcesConfigCache.ResolveService(builder, "svc");
+            var (definition, config) = ResolveServiceStrict.For(builder, "svc");
             // The kind lookup is a pre-flight check that runs before any git or filesystem work
             // (LocalProjectSource.ResolveKindHandler's own doc comment says so, and it runs before
             // the clone). A git client whose every member but the no-op-by-default

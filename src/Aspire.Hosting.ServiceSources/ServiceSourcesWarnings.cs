@@ -322,7 +322,7 @@ internal sealed class ServiceSourcesWarnings
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
         $"Service '{new Name(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
         $"'{new Name(source)}' — {OutOfBandSourceAdvice.SourceDetail(source)}. {OutOfBandSourceAdvice.ExpectedConfiguredWhere(source)}. " +
-        $"{SwitchSourceRemedy}";
+        $"{SwitchSourceRemedy(source)}";
 
     /// <summary>
     /// How to bring the service back under this AppHost's control, for every warning that offers it.
@@ -333,9 +333,9 @@ internal sealed class ServiceSourcesWarnings
     /// half of the offer that reader lost. The exceptions offering the same switch lead into it
     /// differently, which is why only the clause itself is shared.
     /// </remarks>
-    private const string SwitchSourceRemedy =
+    private static string SwitchSourceRemedy(string source) =>
         "To make this AppHost's configuration and start ordering apply instead, " +
-        OutOfBandSourceAdvice.SwitchSource + ".";
+        OutOfBandSourceAdvice.SwitchSourceFor(source) + ".";
 
     /// <summary>
     /// Explains state that was put back: what changed, that it was undone, and what to do instead.
@@ -361,9 +361,13 @@ internal sealed class ServiceSourcesWarnings
         bool everyRevertWasAnAddition,
         IReadOnlyList<string> registeredEndpoints) =>
         $"Service '{new Name(serviceName)}': {string.Join("; ", reverts)}. Its source is '{new Name(source)}' — " +
-        $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
-        $"configure the service where it actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}" +
-        $"{SwitchSourceRemedy}";
+        $"{OutOfBandSourceAdvice.SourceDetail(source)}. " +
+        (string.Equals(source, Sources.UnconfiguredSource.SourceName, StringComparison.Ordinal)
+            // Nothing runs, so there is no endpoint to move and nowhere else to configure it.
+            ? "There is no endpoint to change until a source is chosen. "
+            : $"An out-of-band service's endpoints are fixed by its source, so configure the service where it " +
+              $"actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}") +
+        $"{SwitchSourceRemedy(source)}";
 
     /// <summary>
     /// The clause for what the reader can still reach, chosen by what they were doing.

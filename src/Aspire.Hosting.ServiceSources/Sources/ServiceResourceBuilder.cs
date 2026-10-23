@@ -19,7 +19,7 @@ internal static class Reachability
     /// <c>"disabled"</c> belongs here too — nothing is running at all, deliberately, so every call is
     /// configuration for a resource that no longer exists.
     /// </summary>
-    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes", "disabled" };
+    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes", "disabled", UnconfiguredSource.SourceName };
 
     /// <summary>
     /// Annotation types Aspire attaches as decoration alongside a capability call — never something

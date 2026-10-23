@@ -36,7 +36,7 @@ public class DeveloperConfigValidatorTests
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
         return Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
     }
 
     /// <summary>
@@ -62,7 +62,7 @@ public class DeveloperConfigValidatorTests
 
     /// <summary>
     /// The repository half of the same walk (#291) — validated inside the same
-    /// <c>ResolveService</c> call as the service entries, via <c>DeveloperConfiguration.ReadFrom</c>,
+    /// <c>ResolveServiceOrNotConfigured</c> call as the service entries, via <c>DeveloperConfiguration.ReadFrom</c>,
     /// so <see cref="Load"/> already reaches it; no third helper is needed.
     /// </summary>
     [Fact]
@@ -295,7 +295,7 @@ public class DeveloperConfigValidatorTests
                 "kubernetes": { "context": "my dev ctx", "port": 8080 } } } }
             """));
 
-        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var resolved = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("my dev ctx", resolved.DeveloperConfig.Kubernetes.Context);
     }
@@ -423,7 +423,7 @@ public class DeveloperConfigValidatorTests
                 "kubernetes": { "namespace": "\uFEFForders", "context": "dev", "port": 8080 } } } }
             """));
 
-        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var resolved = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("\ufefforders", resolved.DeveloperConfig.Kubernetes.Namespace);
     }
@@ -445,7 +445,7 @@ public class DeveloperConfigValidatorTests
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
 
-        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+        var resolved = ResolveServiceStrict.For(builder, "orders").DeveloperConfig;
 
         // Not merely "it did not throw": someone "fixing" an exclusion by trimming it at the point
         // of use would pass a no-throw test, and that is the change this pins against. The three
@@ -596,7 +596,7 @@ public class DeveloperConfigValidatorTests
         // Resolving at all is the assertion: a spelling that breaks the file throws
         // InvalidDataException from the JSON provider, and one this rule still refuses throws
         // ServiceSourcesConfigurationException.
-        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ResolveServiceStrict.For(builder, "orders");
     }
 
     [Fact]
@@ -717,7 +717,7 @@ public class DeveloperConfigValidatorTests
 
         var builder = TestHelpers.CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("url", config.Source);
         Assert.Equal("dev-west", config.Kubernetes.Context);
@@ -740,7 +740,7 @@ public class DeveloperConfigValidatorTests
 
         var builder = TestHelpers.CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("/src/orders", config.Local.Path);
     }
@@ -898,7 +898,7 @@ public class DeveloperConfigValidatorTests
 
         var builder = TestHelpers.CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Null(config.Kubernetes.Port);
     }
@@ -1096,7 +1096,7 @@ public class DeveloperConfigValidatorTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("2 problems with the entry", ex.Message);
         Assert.Contains("'ref' is not a valid key here", ex.Message);
@@ -1319,7 +1319,7 @@ public class DeveloperConfigValidatorTests
     private static ServiceDeveloperConfig Resolve(string json)
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
-        return ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+        return ResolveServiceStrict.For(builder, "orders").DeveloperConfig;
     }
 
     [Fact]

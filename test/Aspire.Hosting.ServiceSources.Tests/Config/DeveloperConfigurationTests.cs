@@ -105,7 +105,7 @@ public class DeveloperConfigurationTests
             ["ServiceSources:Services:envoverride:Source"] = "url",
         });
 
-        var (_, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+        var (_, developerConfig) = ResolveServiceStrict.For(builder, "envoverride");
 
         Assert.Equal("url", developerConfig.Source);
     }
@@ -118,7 +118,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("ServiceSources:Services", ex.Message);
         Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
@@ -135,7 +135,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("ServiceSources:Services:orders:source", ex.Message);
         Assert.Contains("under \"services\" in", ex.Message);
@@ -174,7 +174,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("kubernetes", config.Source);
         Assert.Equal("/home/dev/code/orders", config.Local.Path);
@@ -202,7 +202,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("repository", config.Source);
         Assert.Null(config.Local.Path);
@@ -231,7 +231,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("/home/dev/code/orders", config.Repository.Path);
         Assert.Equal("feature/new-checkout", config.Repository.Ref);
@@ -244,7 +244,7 @@ public class DeveloperConfigurationTests
     /// <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>, from
     /// <see cref="DeveloperConfiguration.ReadFrom"/>. Its own deprecation notice is a separate,
     /// resolve-time concern (<c>LocalProjectSource.RepositoryAliasDeprecationNotice</c>, tested in
-    /// <c>AddServiceTests</c>) rather than something <see cref="ServiceSourcesConfigCache.ResolveService"/>
+    /// <c>AddServiceTests</c>) rather than something <see cref="ResolveServiceStrict"/>
     /// alone can show: reading configuration must not, by itself, be what a service is warned for
     /// doing — only actually resolving through <c>"repository"</c> earns that.
     /// </summary>
@@ -260,7 +260,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("/home/dev/code/orders", config.Repository.Path);
         Assert.Equal("feature/new-checkout", config.Repository.Ref);
@@ -286,7 +286,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("Service 'Orders'", ex.Message, StringComparison.Ordinal);
@@ -322,7 +322,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("2 services", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
@@ -353,7 +353,7 @@ public class DeveloperConfigurationTests
         // Resolving at all is the assertion: "reporting" names no service this AppHost's catalog
         // declares (OrdersCatalog has only "orders"), so its conflicting blocks must not stop
         // "orders" from resolving.
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("repository", config.Source);
     }
@@ -378,7 +378,7 @@ public class DeveloperConfigurationTests
             ["ServiceSources:Services:envoverride:Local:Ref"] = "feature/from-env",
         });
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+        var (_, config) = ResolveServiceStrict.For(builder, "envoverride");
 
         Assert.Equal("feature/from-env", config.Repository.Ref);
     }
@@ -399,7 +399,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("ServiceSources:Services", ex.Message);
         Assert.Contains("empty in every configuration source", ex.Message);
@@ -427,7 +427,7 @@ public class DeveloperConfigurationTests
             Args = ["--contentRoot", dir, TestBuilderDefaults.DisableConfigReloadArg],
         });
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("url", config.Source);
     }
@@ -455,7 +455,7 @@ public class DeveloperConfigurationTests
             Args = ["--contentRoot", dir, "--environment", "Cluster", TestBuilderDefaults.DisableConfigReloadArg],
         });
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("kubernetes", config.Source);
     }
@@ -481,7 +481,7 @@ public class DeveloperConfigurationTests
             ["ServiceSources:Services:EnvOverride:Source"] = "url",
         });
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+        var (_, config) = ResolveServiceStrict.For(builder, "envoverride");
 
         Assert.Equal("url", config.Source);
     }
@@ -603,7 +603,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("repository", config.Source);
         Assert.Null(builder.Configuration["ServiceSources:ConnectionStrings:db"]);
@@ -630,7 +630,7 @@ public class DeveloperConfigurationTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains($"create '{Path.Combine(dir, "servicesources.local.json")}'", ex.Message);
         Assert.DoesNotContain("under \"services\" in", ex.Message);
@@ -667,7 +667,7 @@ public class DeveloperConfigurationTests
             ["ServiceSources:Services:switcher:Local:Path"] = checkout,
         });
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "switcher");
+        var (_, config) = ResolveServiceStrict.For(builder, "switcher");
 
         Assert.Equal("repository", config.Source);
         Assert.Equal(checkout, config.Local.Path);
@@ -712,7 +712,7 @@ public class DeveloperConfigurationTests
         builder.Configuration.AddInMemoryCollection(
             new Dictionary<string, string?> { ["ServiceSources:Services:blanking:Local:Path"] = "" });
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "blanking");
+        var (_, config) = ResolveServiceStrict.For(builder, "blanking");
 
         // Source comes only from the file, so it proves the file layer bound at all — without it a
         // null Path could as easily mean the file's value never arrived as that the blank dropped it.
@@ -755,7 +755,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (metadata, config) = ServiceSourcesConfigCache.ResolveService(builder, "blankurl");
+        var (metadata, config) = ResolveServiceStrict.For(builder, "blankurl");
 
         Assert.Null(config.Url.Url);
 
@@ -789,7 +789,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains($"'{rootKey}'", ex.Message);
         Assert.Contains("'services'", ex.Message);
@@ -825,7 +825,7 @@ public class DeveloperConfigurationTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'serivces'", ex.Message);
         Assert.Contains("'services'", ex.Message);
@@ -846,7 +846,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("repository", config.Source);
     }
@@ -865,7 +865,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("empty in every configuration source", ex.Message);
         Assert.DoesNotContain("ConnectionStrings", ex.Message);
@@ -889,7 +889,7 @@ public class DeveloperConfigurationTests
 
         var builder = CreateBuilder(dir);
 
-        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (_, config) = ResolveServiceStrict.For(builder, "orders");
 
         Assert.Equal("repository", config.Source);
     }
@@ -932,7 +932,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'service'", ex.Message);
         Assert.Contains("'services'", ex.Message);
@@ -960,7 +960,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'service'", ex.Message);
         Assert.Contains("'services'", ex.Message);
@@ -985,7 +985,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("empty in every configuration source", ex.Message);
         Assert.DoesNotContain("myOwnSettings", ex.Message);
@@ -1010,7 +1010,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'service'", ex.Message);
         Assert.DoesNotContain("'servcs'", ex.Message);
@@ -1042,7 +1042,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'serivces'", ex.Message);
     }
@@ -1067,7 +1067,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains(
             "Note that 'order' is configured and reaches no declared service. "
@@ -1103,7 +1103,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
@@ -1126,7 +1126,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
@@ -1156,7 +1156,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
@@ -1193,7 +1193,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("'orderr'", ex.Message);
         Assert.DoesNotContain("'ordrs'", ex.Message);
@@ -1212,7 +1212,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "cart"));
+            () => ResolveServiceStrict.For(builder, "cart"));
 
         Assert.Contains("'crat'", ex.Message);
         Assert.Contains("Did you mean 'cart'?", ex.Message);
@@ -1244,7 +1244,7 @@ public class DeveloperConfigurationTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "nearmissenv"));
+            () => ResolveServiceStrict.For(builder, "nearmissenv"));
 
         Assert.Contains(
             "Note that 'nearmisenv' is configured and reaches no declared service. "
@@ -1275,7 +1275,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "carts"));
+            () => ResolveServiceStrict.For(builder, "carts"));
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
@@ -1297,7 +1297,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "cart"));
+            () => ResolveServiceStrict.For(builder, "cart"));
 
         Assert.Contains("'crat'", ex.Message);
         Assert.Contains("Did you mean 'cart'?", ex.Message);
@@ -1331,7 +1331,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains(
             "Did you mean 'orders'? An entry for 'orders' is there already, so the source belongs "
@@ -1370,7 +1370,7 @@ public class DeveloperConfigurationTests
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+            () => ResolveServiceStrict.For(builder, "orders"));
 
         Assert.Contains("Did you mean 'services'?", ex.Message);
         Assert.Contains("Did you mean 'orders'?", ex.Message);
@@ -1399,7 +1399,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.ResolveService(builder, "cart"));
+            () => ResolveServiceStrict.For(builder, "cart"));
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }

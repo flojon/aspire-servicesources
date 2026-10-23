@@ -8,6 +8,10 @@ const builder = await createBuilder();
 // present so the typecheck-typescript CI job compiles a real call to the exported setCheckoutTiming().
 await builder.setCheckoutTiming(CheckoutTiming.Eager);
 
+// Both services are configured, so this changes nothing here; it is present so the
+// typecheck-typescript CI job compiles a real call to the exported useInteractiveServiceConfiguration().
+await builder.useInteractiveServiceConfiguration();
+
 // Both services resolve through the "container" source: a published image run locally. Because
 // they actually run here, the AppHost can configure them directly — addService() returns
 // ServiceResource, a concrete class implementing IResourceWithEnvironment/IResourceWithArgs/

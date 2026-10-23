@@ -61,6 +61,16 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **`builder.UseInteractiveServiceConfiguration()` lets a service nobody chose a source for resolve
+  to a placeholder instead of throwing** ([#128]). The placeholder is a registered resource that
+  starts nothing, has no endpoints and shows `Not configured` in the dashboard, so the AppHost
+  reaches the dashboard on a fresh clone. It is opt-in, ignored when `CI`, `TF_BUILD` or `JENKINS_URL` is set, in publish mode,
+  and when `SERVICESOURCES_INTERACTIVE` is `false` (the setting the source-pick prompt already
+  honours; `true` forces it on after the opt-in). Without the call nothing changes. This is only the
+  first part: there is no dialog to answer yet, so a developer still sets the source in
+  `servicesources.local.json`. `GetServiceEndpoint()` and the type-returning `Unwrap<T>()` still
+  throw on a placeholder.
+
 - **An AppHost run from a linked git worktree starts from the main worktree's state.** Its first run
   copies `servicesources.local.json` and the saved source picks from the main worktree's AppHost, and
   a cold `"repository"` checkout borrows objects from the main worktree's checkout of the same
@@ -2050,6 +2060,7 @@ Targets `net10.0`.
 [#122]: https://github.com/flojon/aspire-servicesources/issues/122
 [#124]: https://github.com/flojon/aspire-servicesources/issues/124
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
+[#128]: https://github.com/flojon/aspire-servicesources/pull/128
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
 [#133]: https://github.com/flojon/aspire-servicesources/issues/133
