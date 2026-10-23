@@ -8,7 +8,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal static class SourceChoices
 {
     // Most useful first; a source missing from the dictionary is simply never offered.
-    private static readonly string[] DisplayOrder = ["repository", "container", "url", "kubernetes", "path", "disabled"];
+    internal static readonly string[] DisplayOrder = ["repository", "container", "url", "kubernetes", "path", "disabled"];
 
     public static IReadOnlyList<string> All() => [.. ServiceSourcesBuilderExtensions.Sources.Keys];
 
