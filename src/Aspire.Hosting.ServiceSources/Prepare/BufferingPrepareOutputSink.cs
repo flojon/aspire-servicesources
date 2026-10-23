@@ -51,7 +51,7 @@ internal sealed class BufferingPrepareOutputSink
 
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, BufferingPrepareOutputSink> Cache = new();
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private readonly Dictionary<string, ServiceBuffer> _buffers = new(StringComparer.Ordinal);
 
@@ -154,7 +154,7 @@ internal sealed class BufferingPrepareOutputSink
     /// </summary>
     private sealed class ServiceBuffer
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         private readonly List<Raw> _head = new(HeadLines);
 

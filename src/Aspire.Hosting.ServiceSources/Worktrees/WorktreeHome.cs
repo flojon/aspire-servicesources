@@ -82,7 +82,7 @@ internal static class WorktreeHome
 
     private sealed class Slot
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
         private IWorktreeProbe _probe = new GitWorktreeProbe();
         private bool _resolved;
         private HomeWorktree? _home;

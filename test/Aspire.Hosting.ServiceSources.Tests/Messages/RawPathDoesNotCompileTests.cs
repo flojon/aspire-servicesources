@@ -127,15 +127,11 @@ public class RawPathDoesNotCompileTests
     public void RawLiteral_CannotBeLinqProjected() =>
         AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Join(", ", new[] { s }.Select(Raw.Literal))}b")""", "CS0411");
 
-    // Known open, pinned so that a future tightening has a red/green signal instead of a guess. The
-    // trailing parameter closes single-argument delegate conversions only, and Enumerable.Zip takes a
-    // two-argument one whose shape Literal now matches exactly. A ref struct would not close it
-    // either: Func declares `allows ref struct` on net9 and later, so it would bite on net8.0 alone.
-    // This shape costs an author a token that has no reason to exist, which is why it is tolerated;
-    // if it ever starts being refused, this assertion failing is the intended signal.
+    // The trailing parameter alone closes single-argument delegate conversions; Enumerable.Zip takes
+    // a two-argument one that Literal matches exactly. ConstantOnly being a ref struct closes it.
     [Fact]
-    public void RawLiteral_IsStillReachableThroughATwoArgumentZip() =>
-        AssertCompiles("""ServiceSourcesConfigurationException.For($"a{new[] { s }.Zip(new[] { default(Raw.ConstantOnly) }, Raw.Literal).First()}b")""");
+    public void RawLiteral_CannotBeReachedThroughATwoArgumentZip() =>
+        AssertRefused("""ServiceSourcesConfigurationException.For($"a{new[] { s }.Zip(new[] { default(Raw.ConstantOnly) }, Raw.Literal).First()}b")""", "CS9244");
 
     // The two [ConstantExpected] parameters are NOT enforced by the compiler — measured, against the
     // prediction that they raise CS9244. Their only enforcement is analyzer CA1857, which this

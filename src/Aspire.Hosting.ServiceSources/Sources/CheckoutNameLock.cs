@@ -39,7 +39,7 @@ internal sealed class CheckoutNameLock
 
     private readonly Dictionary<string, SemaphoreSlim> _semaphores = new(StringComparer.Ordinal);
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     public static CheckoutNameLock For(IDistributedApplicationBuilder builder) =>
         Cache.GetValue(builder, static _ => new CheckoutNameLock());

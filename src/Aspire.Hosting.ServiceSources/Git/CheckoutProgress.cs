@@ -43,7 +43,7 @@ internal sealed class CheckoutProgress : IGitProgressSink
     /// </remarks>
     private const int RetainedLines = 512;
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly Queue<string> _retained = new();
     private readonly List<Channel<string>> _readers = [];
     private bool _completed;

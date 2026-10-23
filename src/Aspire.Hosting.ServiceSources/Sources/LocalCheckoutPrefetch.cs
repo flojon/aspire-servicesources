@@ -133,7 +133,7 @@ internal sealed class LocalCheckoutPrefetch
     /// </summary>
     private readonly HashSet<string> _requested = new(StringComparer.Ordinal);
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private bool _started;
 

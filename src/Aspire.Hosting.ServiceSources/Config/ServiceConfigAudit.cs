@@ -47,7 +47,7 @@ internal static class ServiceConfigAudit
 
     private sealed class Subscription
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         private bool _subscribed;
 

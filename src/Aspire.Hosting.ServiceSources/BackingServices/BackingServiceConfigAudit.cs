@@ -53,7 +53,7 @@ internal static class BackingServiceConfigAudit
     /// </summary>
     private sealed class Declared
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         /// <summary>
         /// Compared the way configuration compares keys, so that an entry written <c>Orders-DB</c>
