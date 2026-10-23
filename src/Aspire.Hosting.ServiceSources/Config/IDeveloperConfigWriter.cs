@@ -1,0 +1,201 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Aspire.Hosting.ServiceSources.Prepare;
+
+namespace Aspire.Hosting.ServiceSources.Config;
+
+/// <summary>The outcome of a save: either it landed, or <see cref="Error"/> says why it did not.</summary>
+internal sealed record SaveResult(bool Saved, string? Error);
+
+/// <summary>Records a developer's source choice for one service in <c>servicesources.local.json</c>.</summary>
+internal interface IDeveloperConfigWriter
+{
+    /// <param name="serviceName">The service as the catalog spells it.</param>
+    /// <param name="source">The chosen source.</param>
+    /// <param name="fields">Follow-up answers; a <c>:</c> in a key nests the value one object deeper.</param>
+    Task<SaveResult> SaveAsync(
+        string serviceName, string source, IReadOnlyDictionary<string, string> fields, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Merges a choice into <c>servicesources.local.json</c> beside the AppHost, leaving everything else
+/// in the file as it was.
+/// </summary>
+internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
+{
+    /// <summary>Largest file read; anything bigger is refused rather than buffered.</summary>
+    public const int MaxBytes = 256 * 1024;
+
+    // Process-wide so two writers over one file cannot interleave their read-modify-write.
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+
+    // The configuration reader accepts these, so a file that loads today must also be savable.
+    private static readonly JsonDocumentOptions ParseOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+    };
+
+    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
+    private readonly string _path;
+
+    public JsonFileDeveloperConfigWriter(string appHostDirectory)
+    {
+        _path = Path.Combine(appHostDirectory, DeveloperConfiguration.FileName);
+    }
+
+    public async Task<SaveResult> SaveAsync(
+        string serviceName, string source, IReadOnlyDictionary<string, string> fields, CancellationToken cancellationToken)
+    {
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        string? scratch = null;
+
+        try
+        {
+            var root = ReadRoot(out var error);
+            if (root is null)
+            {
+                return new SaveResult(false, error);
+            }
+
+            var services = GetOrAddObject(root, DeveloperConfigFileSource.FileServicesKey);
+            if (services is null)
+            {
+                return new SaveResult(false, $"'{DeveloperConfigFileSource.FileServicesKey}' in {_path} is not an object.");
+            }
+
+            var entry = GetOrAddObject(services, serviceName);
+            if (entry is null)
+            {
+                return new SaveResult(false, $"The entry for '{serviceName}' in {_path} is not an object.");
+            }
+
+            Set(entry, "source", source);
+
+            foreach (var (key, value) in fields)
+            {
+                var target = entry;
+                var parts = key.Split(':');
+                foreach (var part in parts[..^1])
+                {
+                    target = GetOrAddObject(target, part, replaceScalar: true)!;
+                }
+
+                Set(target, parts[^1], value);
+            }
+
+            var directory = Path.GetDirectoryName(_path)!;
+            Directory.CreateDirectory(directory);
+            scratch = Path.Combine(directory, $".incoming-{DeveloperConfiguration.FileName}-{Guid.NewGuid():N}");
+            await File.WriteAllTextAsync(
+                scratch, root.ToJsonString(WriteOptions), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+            PrepareMarker.MoveOntoMarker(scratch, _path);
+            scratch = null;
+
+            return new SaveResult(true, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new SaveResult(false, $"Could not write {_path}: {ex.Message}");
+        }
+        finally
+        {
+            if (scratch is not null)
+            {
+                PrepareMarker.TryDelete(scratch);
+            }
+
+            Gate.Release();
+        }
+    }
+
+    private JsonObject? ReadRoot(out string? error)
+    {
+        error = null;
+
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(_path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new JsonObject();
+        }
+
+        // A link is not replaced: renaming over it would sever it from what it points at.
+        if (attributes.HasFlag(FileAttributes.Directory) || attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            error = $"{_path} is not a regular file.";
+            return null;
+        }
+
+        byte[] bytes;
+        using (var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+        {
+            var buffer = new byte[MaxBytes + 1];
+            var length = 0;
+            int read;
+            while (length < buffer.Length && (read = stream.Read(buffer, length, buffer.Length - length)) > 0)
+            {
+                length += read;
+            }
+
+            if (length > MaxBytes)
+            {
+                error = $"{_path} is larger than {MaxBytes} bytes.";
+                return null;
+            }
+
+            bytes = buffer[..length];
+        }
+
+        try
+        {
+            var node = JsonNode.Parse(bytes, nodeOptions: null, ParseOptions);
+            if (node is JsonObject root)
+            {
+                return root;
+            }
+
+            error = $"{_path} does not contain a JSON object at its root.";
+        }
+        catch (JsonException ex)
+        {
+            error = $"{_path} is not valid JSON: {ex.Message}";
+        }
+
+        return null;
+    }
+
+    // Matches an existing key whatever its case, so the developer's spelling is kept.
+    private static string? FindKey(JsonObject parent, string name) =>
+        parent.Select(property => property.Key)
+            .FirstOrDefault(key => string.Equals(key, name, StringComparison.OrdinalIgnoreCase));
+
+    private static JsonObject? GetOrAddObject(JsonObject parent, string name, bool replaceScalar = false)
+    {
+        var key = FindKey(parent, name);
+        if (key is not null)
+        {
+            if (parent[key] is JsonObject existing)
+            {
+                return existing;
+            }
+
+            if (!replaceScalar)
+            {
+                return null;
+            }
+        }
+
+        var created = new JsonObject();
+        parent[key ?? name] = created;
+        return created;
+    }
+
+    private static void Set(JsonObject parent, string name, string value) =>
+        parent[FindKey(parent, name) ?? name] = value;
+}
