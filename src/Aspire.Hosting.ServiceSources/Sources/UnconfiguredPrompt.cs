@@ -106,7 +106,7 @@ internal static class UnconfiguredPrompt
             ServiceSourcesLog.Information(
                 logger,
                 $"The source dialog was closed, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. "
-                + $"Set '{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<name>:source' to configure them.");
+                + $"{HowToConfigure}");
             return;
         }
 
@@ -146,7 +146,7 @@ internal static class UnconfiguredPrompt
             ServiceSourcesLog.Information(
                 logger,
                 $"No source was chosen in the source dialog, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. "
-                + $"Set '{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<name>:source' to configure them.");
+                + $"{HowToConfigure}");
             return;
         }
 
@@ -346,6 +346,11 @@ internal static class UnconfiguredPrompt
             logger,
             $"No source was asked for, because {because}, so {unconfigured.Count} service(s) stay unconfigured: {keys}.");
     }
+
+    // The command is the way back in once the dialog is gone; the key is the way for CI and scripts.
+    private static Raw HowToConfigure =>
+        Raw.Compose($"Use Configure on the service's row in the dashboard, or set "
+            + $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<name>:source'.");
 
     private static Raw Names(IReadOnlyList<Unconfigured> unconfigured) =>
         Raw.Join(", ", unconfigured.Select(service => Raw.Compose($"'{new Name(service.ServiceName)}'")));

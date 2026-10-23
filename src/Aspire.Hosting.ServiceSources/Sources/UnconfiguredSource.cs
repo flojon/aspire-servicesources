@@ -25,7 +25,20 @@ internal static class UnconfiguredSource
     public static IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition)
     {
+        var configure = new UnconfiguredConfigureCommand(
+            new Unconfigured(serviceName, definition), UnconfiguredRegistry.CreateWriter(builder.AppHostDirectory));
+
         var real = builder.AddResource(new UnconfiguredServiceResource(serviceName))
+            .WithCommand(
+                UnconfiguredConfigureCommand.Name,
+                UnconfiguredConfigureCommand.DisplayName,
+                configure.ExecuteAsync,
+                new CommandOptions
+                {
+                    Description = "Choose a source for this service; it takes effect the next time the AppHost starts.",
+                    IconName = "Settings",
+                    IsHighlighted = true,
+                })
             .WithInitialState(new CustomResourceSnapshot
             {
                 ResourceType = "Service (unconfigured)",

@@ -78,6 +78,9 @@ internal sealed class UnconfiguredRegistry
         });
     }
 
+    public static IDeveloperConfigWriter CreateWriter(string appHostDirectory) =>
+        new JsonFileDeveloperConfigWriter(appHostDirectory);
+
     private void Start(IServiceProvider services, string appHostDirectory)
     {
         var snapshot = Services;
@@ -96,7 +99,7 @@ internal sealed class UnconfiguredRegistry
         }
 
         var stopping = services.GetService<IHostApplicationLifetime>()?.ApplicationStopping ?? CancellationToken.None;
-        var writer = new JsonFileDeveloperConfigWriter(appHostDirectory);
+        var writer = CreateWriter(appHostDirectory);
 
         // Not awaited, and no deadline: startup must not wait on a person, and the prompt has
         // nothing to fall back to if it gives up.
