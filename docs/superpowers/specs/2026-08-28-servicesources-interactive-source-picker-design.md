@@ -30,9 +30,8 @@ and described `CI` and `SERVICESOURCES_INTERACTIVE` as new when #428 already own
   checkouts to run, skips the rest and remembers the answer in `.servicesources/selection.json`.
   It cannot help a service that has no source at all, because `AddService()` throws before the
   prompt exists. This design covers that gap; the two prompts must read as one flow, not two.
-- **#134 and #69 have merged**, so the "two config files read directly" description under
-  *Persistence and restart* is out of date and must be re-checked against them before
-  implementation.
+- **#134 and #69 have merged**, so *Persistence and restart* was re-derived against them
+  (2026-10-18); the "two config files read directly" description it started from no longer holds.
 - **`UseDeferredCheckout()` and `UseJava()` are now obsolete no-ops**, so the opt-in family named
   below is not a family to join.
 
@@ -149,9 +148,15 @@ until the wait resolves, and a placeholder never reaches `Running`. A consumer t
 `WaitFor(orders)` would keep the event from firing, so the prompt that could unblock it would never
 appear. #428 hit the same trap and moved to `BeforeStartEvent`, running the dialog on a task nobody
 awaits (`DeferredCheckout`, the comment above its subscription); this design does the same. The
-placeholder is also `IResourceWithoutLifetime`, so a consumer's `WaitFor` on it is ignored rather
-than hanging. Both are needed: the event choice keeps the prompt reachable, the marker keeps the
-consumer starting.
+placeholder must also not hold a consumer back, and that mechanism is **not yet verified for a
+registered resource**. `url` and `disabled` get it from `UnregisteredServiceStartupGuard`, which strips
+the consumer's `WaitAnnotation` at `BeforeStartEvent` because their facade is unregistered
+(`ServiceResource` deliberately omits `IResourceWithoutLifetime`, as the marker would also suppress
+`WaitFor` on `container`/`kubernetes`/`repository`). The placeholder is registered, so either it
+carries `IResourceWithoutLifetime` — which should make Aspire ignore the wait, to be measured — or the
+guard's source list grows to include it. Both halves are needed: the event choice keeps the prompt
+reachable, and one of these keeps the consumer starting. The wait-safety test below pins whichever is
+chosen.
 
 ### A consumer can reference an endpoint-less placeholder safely
 
@@ -213,8 +218,8 @@ is intended: a CI job that opted out of one question should not be asked the oth
 | `1` / `true` / `yes` | Interactive regardless of `CI` |
 | `0` / `false` / `no` | Strict regardless of `CI` |
 
-`CI` counts as set when it is anything but empty or a false value (`false`, `0`, `no`). The override has no effect
-without the opt-in — nothing changes for an AppHost that never called it — and none in publish
+`CI` counts as set when it is anything but empty or a false value (`false`, `0`, `no`). The override
+has no effect without the opt-in — nothing changes for an AppHost that never called it — and none in publish
 mode, where a manifest cannot describe the placeholder and a missing source keeps failing fast.
 
 Strict mode is today's behaviour verbatim: `ServiceSourcesConfigurationException` naming the
@@ -275,14 +280,16 @@ service too, with no developer config and no network access.
 
 That opens a faster path than the placeholder. For a catalog entry whose `kind` is `dotnet`, this
 design *could* speculatively register an explicit-start `ProjectResource` at the path a managed
-checkout would occupy, using the deferred-checkout mechanism that is now the default. If the developer then answers `repository` with
-a managed checkout, it clones and starts in the same run — no restart at all.
+checkout would occupy, using the deferred-checkout mechanism that is now the default. If the
+developer then answers `repository` with a managed checkout, it clones and starts in the same run —
+no restart at all.
 
 It is recorded as an option rather than the recommendation because of what it costs when the guess
-is wrong. Any other answer — `container`, `url`, `kubernetes`, or `path` as a self-managed
-`path` — leaves a phantom `NotStarted` project resource in the dashboard for a service that is not
-a project, and the `path` answer still needs a restart because it changes the frozen path. It
-trades dashboard clarity for a faster first run, and it only ever helps `kind: dotnet`. Worth
+is wrong. Any other answer — `container`, `url`, `kubernetes` or `disabled` — leaves a phantom
+`NotStarted` project resource in the dashboard for a service that is not a project, and a self-managed
+`path` answer both leaves one and still needs a restart because it changes the frozen path. It
+trades dashboard clarity for a faster first run, and it only ever helps `kind: dotnet` (the default
+kind, which requires a `project`). Worth
 revisiting now that deferred checkout has settled in practice.
 
 ### Push, then pull
@@ -307,7 +314,7 @@ run — the failure this design exists to remove. The rules, read off each sourc
 |---|---|
 | `repository` | the catalog entry names a repository to clone (`LocalGitCheckout.HasRepositoryToClone`) |
 | `container` | it has a `container` block with an `image` and a `port` (`ContainerSource.ResolveContainerConfig`) |
-| `kubernetes` | it has a `kubernetes` block (`KubernetesSource`); any further required field is to be confirmed |
+| `kubernetes` | it has a `kubernetes` block naming a `service` (`KubernetesSource.RequireKubernetesBlock`) |
 | `url`, `path`, `disabled` | always — a developer's own `url`, `path` or nothing at all is enough |
 
 `AddService`'s `DeclaredResolutions` cannot be reused for this, which an earlier draft claimed. It is
@@ -324,9 +331,10 @@ may set per source is fixed by the config types (`ServiceDeveloperConfig` and it
 requires a `path` unless the catalog entry has a `path:`; `url` requires a `url` when the catalog
 entry has none (`UrlSource.ResolveUrl` throws otherwise) and otherwise only overrides it; `repository` takes an optional `ref`
 and `path`; `container` takes only an optional `tag` — its image comes from the catalog, so it is not
-asked for; `kubernetes` takes optional `context`, `namespace`, `port` and `scheme`; `disabled` takes
-nothing. The common answer — `repository`, `container`, `disabled` — therefore needs no follow-up at
-all. This two-step shape is forced: `PromptInputsAsync` takes a fixed input list, so a field cannot
+asked for; `kubernetes` requires a `context` always and a `port` when the catalog entry has none
+(`KubernetesSource.BuildPortForwardArgs` throws otherwise), and takes optional `namespace` and
+`scheme`; `disabled` takes nothing. The common answer — `repository`, `container`, `disabled` —
+therefore needs no follow-up at all, while `kubernetes` always has one. This two-step shape is forced: `PromptInputsAsync` takes a fixed input list, so a field cannot
 appear in response to an earlier answer in the same form. #70 weighed the alternative — every field at
 once, with `ValidationCallback` rejecting mismatches — and judged sequential prompts read better and
 behave correctly in the CLI; this design follows that. Validation reuses the #43 rules: the raw
@@ -366,13 +374,12 @@ has. The file is created if absent. #69 may later move this onto `IConfiguration
 secrets; the merge logic is written behind a small interface so that swap does not rewrite the
 dialog code.
 
-As drafted, "unconfigured" meant *present in `servicesources.yaml`, absent from
+As first drafted, "unconfigured" meant *present in `servicesources.yaml`, absent from
 `servicesources.local.json`*. #134 made the catalog authorable in code and #69 moved developer
 config onto `IConfiguration`, so neither half is necessarily a file any more. The concept
 survives — a service the AppHost knows about but the developer has not chosen a source for — but
 the implementation must read "services that exist" from the catalog and "chosen sources" from
-developer config as they now work, and write answers where #69 says developer config lives. This
-design does not fix that; the first implementation step is to re-derive it.
+developer config as they now work, and write answers where #69 says developer config lives.
 
 **Re-derived against main (2026-10-18):**
 
@@ -445,7 +452,8 @@ The dialog itself needs a live AppHost and a dashboard client, so the logic is k
 - Decision matrix: the combinations of opt-in, `CI` (including `false` and `0`) and
   `SERVICESOURCES_INTERACTIVE` (including an unrecognised value), asserted against
   `InteractivePrompts` so the two prompts cannot drift.
-- Source-option derivation: the choice list equals the source dictionary's keys.
+- Source-option derivation: before per-service filtering, the choice list equals the source
+  dictionary's keys; the filtered list is what the per-source predicate allows.
 - Wait safety: a consumer that `WaitFor`s a placeholder starts, and the prompt is still raised
   (the `AfterResourcesCreatedEvent` deadlock).
 - Config merge round-trip: writing a chosen source into a file with existing entries preserves
@@ -458,7 +466,14 @@ The dialog itself needs a live AppHost and a dashboard client, so the logic is k
 - Blank shadowing: a blank value for the key in a provider above the file produces the warning;
   no such provider produces none.
 - Per-service choices: a service whose catalog entry declares no `container` block is not offered
-  `container`.
+  `container`; none without a repository is offered `repository`; none without a `kubernetes.service`
+  is offered `kubernetes`; `url`, `path` and `disabled` are always offered.
+- Follow-up prompt: `kubernetes` asks for `context` (and `port` when the catalog has none); `path`
+  asks for `path` unless the catalog has one; `url` asks for `url` unless the catalog has one;
+  `repository`, `container` and `disabled` ask for nothing.
+- `Configure` command: invoking it on a placeholder runs the same prompt and save as the push path.
+- Two prompts in one run: a partly configured file raises both dialogs, each for its own services
+  only.
 - State durability: the placeholder's custom state and property are still present after the
   application has started and DCP has published its own updates — the microsoft/aspire#13647
   check noted above.
