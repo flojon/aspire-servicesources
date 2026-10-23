@@ -72,7 +72,8 @@ internal static class PickerAnswers
         {
             if (provider.TryGet(key, out var value) && string.IsNullOrWhiteSpace(value))
             {
-                return provider.GetType().Name;
+                // A file provider's ToString names its file, which tells the developer where to look; it carries no values.
+                return provider.ToString();
             }
         }
 

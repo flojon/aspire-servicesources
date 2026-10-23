@@ -110,7 +110,7 @@ public static class ServiceSourcesBuilderExtensions
             // The dashboard Reason stays short; the full text keeps the near-miss hints for a typo'd key.
             ServiceSourcesWarnings.For(builder).AddNotice(Raw.Cause(notConfigured!));
 
-            return UnconfiguredSource.Resolve(builder, name);
+            return UnconfiguredSource.Resolve(builder, name, definition);
         }
 
         // Resolved once here rather than inside each source: the source that actually reads it

@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -22,8 +23,10 @@ internal static class UnconfiguredSource
     internal const string StateText = "Not configured";
 
     public static IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition)
     {
+        UnconfiguredRegistry.For(builder).Record(builder, serviceName, definition);
+
         var real = builder.AddResource(new UnconfiguredServiceResource(serviceName))
             .WithInitialState(new CustomResourceSnapshot
             {
