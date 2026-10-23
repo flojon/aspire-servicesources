@@ -193,7 +193,7 @@ internal sealed class DeferredCheckout
                         original.Name,
                         original.DisplayName,
                         context => StartGates.CommandState(this, original, context),
-                        async context => StartGates.NotRunningFor(this, original.Name) is { } refusal
+                        async context => StartGates.CommandRefusal(this, original.Name) is { } refusal
                             ? new ExecuteCommandResult { Success = false, Message = refusal.ToString() }
                             : await original.ExecuteCommand(context).ConfigureAwait(false),
                         original.DisplayDescription,
@@ -1713,8 +1713,9 @@ internal sealed class DeferredCheckout
     }
 
     /// <summary>
-    /// Waits until DCP has withheld the resource: it reports <c>NotStarted</c>, or the "Awaiting
-    /// source selection" text this class replaced that state with while the dialog was open.
+    /// Waits until DCP has withheld the resource: it reports <c>NotStarted</c>, the "Awaiting
+    /// source selection" text this class replaced that state with while the dialog was open, or the
+    /// <c>FailedToStart</c> left by a Start that reached DCP before the commands were gated.
     /// </summary>
     private static Task WaitUntilWithheldAsync(
         ResourceNotificationService notifications, string resourceName, CancellationToken cancellationToken) =>
@@ -1722,6 +1723,7 @@ internal sealed class DeferredCheckout
             resourceName,
             resourceEvent => resourceEvent.Snapshot.State?.Text is { } text
                 && (string.Equals(text, KnownResourceStates.NotStarted, StringComparison.Ordinal)
+                    || string.Equals(text, KnownResourceStates.FailedToStart, StringComparison.Ordinal)
                     || text.StartsWith(SourcePrompt.AwaitingStatePrefix, StringComparison.Ordinal)),
             cancellationToken);
 
@@ -1869,6 +1871,15 @@ internal static class StartGates
             _ => null,
         };
     }
+
+    /// <summary>The reason a lifecycle command is refused, or <see langword="null"/> to run it.</summary>
+    /// <remarks>
+    /// Start is refused here, before DCP sees it: a Start refused from <c>BeforeResourceStartedEvent</c>
+    /// paints the resource <c>FailedToStart</c>, and Aspire's <c>WaitFor</c> and <c>WaitForCompletion</c>
+    /// fail every resource waiting on a dependency the moment it shows that state.
+    /// </remarks>
+    public static Raw? CommandRefusal(DeferredCheckout.Deferred deferred, string command) =>
+        command == KnownResourceCommands.StartCommand ? RefusalFor(deferred) : NotRunningFor(deferred, command);
 
     /// <summary>
     /// The reason Stop or Restart has nothing to act on, or <see langword="null"/> for Start and for a

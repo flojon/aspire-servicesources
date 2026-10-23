@@ -2013,6 +2013,186 @@ public class DeferredCheckoutTests
         await TasksAsync(builder);
     }
 
+    private const string SourcePickStage = "source pick";
+
+    private const string CheckingOutStage = "checking out";
+
+    /// <remarks>
+    /// The refusal says the service starts by itself once the dialog is answered, which only holds
+    /// if the refused Start leaves it in a state the package still recognises as withheld.
+    /// </remarks>
+    [Fact]
+    public async Task AStartRefusedWhileTheSourcePickIsOpen_StillStartsOnceItIsAnswered()
+    {
+        await using var scenario = await RefusedStartScenario.CreateAsync(SourcePickStage, KnownResourceStates.Finished);
+
+        var refusal = await scenario.StartAsync();
+
+        Assert.False(refusal.Success);
+        Assert.Contains("not ready yet", refusal.Message, StringComparison.Ordinal);
+        Assert.StartsWith(SourcePrompt.AwaitingStatePrefix, CurrentState(scenario.Services, scenario.Orders), StringComparison.Ordinal);
+
+        scenario.Release();
+
+        await scenario.Started.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(KnownResourceStates.Finished, CurrentState(scenario.Services, scenario.Orders));
+    }
+
+    /// <remarks>
+    /// Aspire's waits give up on a dependency the moment it reports <c>FailedToStart</c>, so a
+    /// refused Start that left that state behind would fail everything waiting on the service.
+    /// </remarks>
+    [Theory]
+    [InlineData(SourcePickStage, WaitType.WaitForCompletion)]
+    [InlineData(SourcePickStage, WaitType.WaitUntilHealthy)]
+    [InlineData(CheckingOutStage, WaitType.WaitForCompletion)]
+    [InlineData(CheckingOutStage, WaitType.WaitUntilHealthy)]
+    public async Task AStartRefusedBeforeTheServiceIsReady_DoesNotFailWhatWaitsOnIt(string stage, WaitType waitType)
+    {
+        var completion = waitType == WaitType.WaitForCompletion;
+        await using var scenario = await RefusedStartScenario.CreateAsync(
+            stage, completion ? KnownResourceStates.Finished : KnownResourceStates.Running);
+
+        var waiter = new Waiter();
+        waiter.Annotations.Add(new WaitAnnotation(scenario.Orders, waitType)
+        {
+            WaitBehavior = WaitBehavior.StopOnResourceUnavailable,
+        });
+        var waiting = scenario.Services.GetRequiredService<ResourceNotificationService>()
+            .WaitForDependenciesAsync(waiter, scenario.Stopping);
+
+        var refusal = await scenario.StartAsync();
+        Assert.False(refusal.Success);
+        Assert.NotEqual(KnownResourceStates.FailedToStart, CurrentState(scenario.Services, scenario.Orders));
+
+        scenario.Release();
+        await scenario.Started.WaitAsync(TimeSpan.FromSeconds(30));
+
+        if (completion)
+        {
+            await waiting.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        else
+        {
+            // Past Running, a healthy wait needs a ResourceReadyEvent only the real orchestrator raises.
+            await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(500)));
+            Assert.False(waiting.IsFaulted, waiting.Exception?.InnerException?.Message);
+        }
+    }
+
+    private sealed class Waiter() : Resource("waiter");
+
+    /// <summary>
+    /// A deferred service held at <paramref name="stage"/>, with a Start command that stands in for
+    /// DCP's: it raises <c>BeforeResourceStartedEvent</c>, and a handler that throws leaves the
+    /// resource <c>FailedToStart</c> exactly as <c>DcpExecutor.StartResourceAsync</c> does.
+    /// </summary>
+    private sealed class RefusedStartScenario : IAsyncDisposable
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly ManualResetEventSlim _release = new(false);
+
+        private ManualResetEventSlim? _releaseClone;
+
+        private IDistributedApplicationBuilder _builder = null!;
+
+        public IServiceProvider Services { get; private set; } = null!;
+
+        public IResource Orders { get; private set; } = null!;
+
+        public Task Started => _started.Task;
+
+        public CancellationToken Stopping => Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
+
+        public static async Task<RefusedStartScenario> CreateAsync(string stage, string startedState)
+        {
+            var scenario = new RefusedStartScenario();
+            var dir = CreateAppHostDirectory("orders");
+            var interaction = new FakeInteractionService { IsAvailable = true };
+            var git = new FakeGitClient();
+            var builder = scenario._builder = PromptBuilder(dir, interaction);
+
+            if (stage == SourcePickStage)
+            {
+                interaction.Answer = inputs =>
+                {
+                    scenario._release.Wait(TimeSpan.FromSeconds(30));
+                    return Checked(inputs, true);
+                };
+            }
+            else
+            {
+                PlantSelection(dir, """{ "version": 1, "services": { "orders": { "start": true } } }""");
+                scenario._releaseClone = git.BlockFor(OrdersUrl);
+            }
+
+            new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+            var orders = scenario.Orders = RealResource(builder, "orders");
+            orders.Annotations.Add(new ResourceCommandAnnotation(
+                KnownResourceCommands.StartCommand, KnownResourceCommands.StartCommand, _ => ResourceCommandState.Enabled,
+                context => scenario.DcpStartAsync(context, startedState),
+                null, null, null, null, null, false));
+
+            scenario.Services = await RunGateAsync(builder, "orders");
+
+            var held = stage == SourcePickStage ? SourcePrompt.AwaitingStatePrefix : "Checking out";
+            AssertWaitsFor(
+                () => CurrentState(scenario.Services, orders)?.StartsWith(held, StringComparison.Ordinal) == true,
+                $"the service never reached '{held}'.");
+
+            return scenario;
+        }
+
+        /// <summary>A Start sent the way the CLI and the dashboard send it.</summary>
+        public Task<ExecuteCommandResult> StartAsync() =>
+            Services.GetRequiredService<ResourceCommandService>()
+                .ExecuteCommandAsync(Orders, KnownResourceCommands.StartCommand);
+
+        /// <summary>Answers the dialog with the service checked, or lets the clone finish.</summary>
+        public void Release()
+        {
+            _release.Set();
+            _releaseClone?.Set();
+        }
+
+        private async Task<ExecuteCommandResult> DcpStartAsync(ExecuteCommandContext context, string startedState)
+        {
+            var notifications = context.Services.GetRequiredService<ResourceNotificationService>();
+
+            try
+            {
+                await _builder.Eventing.PublishAsync(
+                    new BeforeResourceStartedEvent(Orders, context.Services), context.CancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await notifications.PublishUpdateAsync(Orders, snapshot => snapshot with
+                {
+                    State = new ResourceStateSnapshot(KnownResourceStates.FailedToStart, KnownResourceStateStyles.Error),
+                });
+
+                return new ExecuteCommandResult { Success = false, Message = ex.Message };
+            }
+
+            await notifications.PublishUpdateAsync(Orders, snapshot => snapshot with
+            {
+                State = new ResourceStateSnapshot(startedState, null),
+                ExitCode = startedState == KnownResourceStates.Finished ? 0 : null,
+            });
+
+            _started.TrySetResult();
+            return new ExecuteCommandResult { Success = true };
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Release();
+            Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+            await TasksAsync(_builder);
+        }
+    }
+
     [Fact]
     public async Task AnAnswerArrivingBeforeNotStarted_LeavesNoAwaitingStateBehind()
     {
