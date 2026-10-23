@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Aspire.Hosting.ServiceSources.Prepare;
@@ -37,7 +38,11 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
         AllowTrailingCommas = true,
     };
 
-    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private readonly string _path;
 
@@ -90,7 +95,7 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
             Directory.CreateDirectory(directory);
             scratch = Path.Combine(directory, $".incoming-{DeveloperConfiguration.FileName}-{Guid.NewGuid():N}");
             await File.WriteAllTextAsync(
-                scratch, root.ToJsonString(WriteOptions), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+                scratch, root.ToJsonString(WriteOptions) + Environment.NewLine, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             PrepareMarker.MoveOntoMarker(scratch, _path);
             scratch = null;
 
@@ -152,8 +157,22 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
             bytes = buffer[..length];
         }
 
+        // The configuration reader accepts a BOM; JsonNode.Parse does not.
+        ReadOnlySpan<byte> bom = [0xEF, 0xBB, 0xBF];
+        if (bytes.AsSpan().StartsWith(bom))
+        {
+            bytes = bytes[bom.Length..];
+        }
+
         try
         {
+            if (HasComments(bytes))
+            {
+                // Comments cannot survive a JsonNode round trip, so refuse rather than drop them.
+                error = $"{_path} contains comments, which saving would remove. Edit the file by hand instead.";
+                return null;
+            }
+
             var node = JsonNode.Parse(bytes, nodeOptions: null, ParseOptions);
             if (node is JsonObject root)
             {
@@ -168,6 +187,25 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
         }
 
         return null;
+    }
+
+    private static bool HasComments(byte[] json)
+    {
+        var reader = new Utf8JsonReader(json, new JsonReaderOptions
+        {
+            CommentHandling = JsonCommentHandling.Allow,
+            AllowTrailingCommas = true,
+        });
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.Comment)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Matches an existing key whatever its case, so the developer's spelling is kept.

@@ -153,4 +153,109 @@ public class JsonFileDeveloperConfigWriterTests
         var services = ReadRoot(dir)["services"]!.AsObject();
         Assert.Equal(8, services.Count);
     }
+
+    [Theory]
+    [InlineData("// note\n{ \"services\": {} }")]
+    [InlineData("{ \"services\": { /* keep */ } }")]
+    public async Task Save_CommentedFile_ReturnsErrorAndLeavesFileByteIdentical(string content)
+    {
+        var dir = NewDirectory();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(FileIn(dir), bytes);
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.False(result.Saved);
+        Assert.Contains(DeveloperConfiguration.FileName, result.Error);
+        Assert.Equal(bytes, File.ReadAllBytes(FileIn(dir)));
+    }
+
+    [Fact]
+    public async Task Save_FileWithBom_Saves()
+    {
+        var dir = NewDirectory();
+        File.WriteAllText(FileIn(dir), """{ "repositoryRoot": "x" }""", new System.Text.UTF8Encoding(true));
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.True(result.Saved, result.Error);
+        var root = ReadRoot(dir);
+        Assert.Equal("x", (string?)root["repositoryRoot"]);
+        Assert.Equal("repository", (string?)root["services"]!["orders"]!["source"]);
+    }
+
+    [Fact]
+    public async Task Save_TrailingComma_Saves()
+    {
+        var dir = NewDirectory();
+        File.WriteAllText(FileIn(dir), """{ "repositoryRoot": "x", }""");
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.True(result.Saved, result.Error);
+        Assert.Equal("x", (string?)ReadRoot(dir)["repositoryRoot"]);
+    }
+
+    [Fact]
+    public async Task Save_ExistingValues_AreNotEscapedAndFileEndsWithNewline()
+    {
+        var dir = NewDirectory();
+        File.WriteAllText(FileIn(dir), """{ "repositoryRoot": "едц <a&b> it's +" }""");
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.True(result.Saved, result.Error);
+        var text = File.ReadAllText(FileIn(dir));
+        Assert.Contains("\"едц <a&b> it's +\"", text);
+        Assert.EndsWith(Environment.NewLine, text);
+    }
+
+    [Fact]
+    public async Task Save_ServicesNotObject_ReturnsErrorAndLeavesFileUnchanged()
+    {
+        var dir = NewDirectory();
+        const string Content = """{ "services": "oops" }""";
+        File.WriteAllText(FileIn(dir), Content);
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.False(result.Saved);
+        Assert.Equal(Content, File.ReadAllText(FileIn(dir)));
+    }
+
+    [Fact]
+    public async Task Save_ServiceEntryNotObject_ReturnsError()
+    {
+        var dir = NewDirectory();
+        File.WriteAllText(FileIn(dir), """{ "services": { "orders": "oops" } }""");
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.False(result.Saved);
+    }
+
+    [Fact]
+    public async Task Save_ScalarWhereFieldBlockGoes_IsReplacedByTheBlock()
+    {
+        var dir = NewDirectory();
+        File.WriteAllText(FileIn(dir), """{ "services": { "orders": { "kubernetes": "oops" } } }""");
+
+        var result = await Save(dir, "orders", "kubernetes", new Dictionary<string, string> { ["kubernetes:context"] = "x" });
+
+        Assert.True(result.Saved, result.Error);
+        Assert.Equal("x", (string?)ReadRoot(dir)["services"]!["orders"]!["kubernetes"]!["context"]);
+    }
+
+    [Fact]
+    public async Task Save_OversizedFile_ReturnsErrorAndLeavesFileUnchanged()
+    {
+        var dir = NewDirectory();
+        var content = "{ \"repositoryRoot\": \"" + new string('a', JsonFileDeveloperConfigWriter.MaxBytes) + "\" }";
+        File.WriteAllText(FileIn(dir), content);
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.False(result.Saved);
+        Assert.Equal(content, File.ReadAllText(FileIn(dir)));
+    }
 }
