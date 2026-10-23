@@ -131,7 +131,7 @@ internal sealed class ProcessBuildRunner(
     /// <summary>Streams the first lines live and keeps only the last few of the rest, like the prepare output cap.</summary>
     private sealed class CappedOutput(Action<string> onLine, int head, int tail)
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
         private readonly Queue<string> _tail = new();
         private int _total;
 

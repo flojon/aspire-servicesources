@@ -515,9 +515,9 @@ internal sealed class DeveloperConfiguration
                 $"{(FileFound
                     ? Raw.Compose(
                         $"add \"{new Name(serviceName)}\": {{ \"source\": \"...\" }} under \"services\" in " +
-                        $"'{Raw.Escaped(FilePath)}', ")
+                        $"'{Raw.Display(FilePath)}', ")
                     : Raw.Compose(
-                        $"create '{Raw.Escaped(FilePath)}' with {{ \"services\": {{ \"{new Name(serviceName)}\": " +
+                        $"create '{Raw.Display(FilePath)}' with {{ \"services\": {{ \"{new Name(serviceName)}\": " +
                         $"{{ \"source\": \"...\" }} }} }}, "))}" +
                 $"or set the environment variable {Raw.Escaped(EnvironmentVariableFor(serviceName))}." +
                 // The root-key note first, because it is the causally prior fact: it says the
@@ -644,7 +644,7 @@ internal sealed class DeveloperConfiguration
         NearMissRootKey is null
             ? Raw.Literal("")
             : Raw.Compose(
-                $" Note that '{Raw.Escaped(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}' and " +
+                $" Note that '{Raw.Display(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}' and " +
                 $"configures no services " +
                 $"under 'services', so none of the service entries in that file are being read — whatever " +
                 $"is configured is coming from another layer. Did you mean 'services'?");
@@ -671,11 +671,11 @@ internal sealed class DeveloperConfiguration
         ServiceSourcesConfigurationException.For(
             $"{(NearMissRootKey is not null
                 ? Raw.Compose(
-                    $"No service sources are configured: '{Raw.Escaped(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}'. Did you mean 'services'?")
+                    $"No service sources are configured: '{Raw.Display(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}'. Did you mean 'services'?")
                 : Raw.Compose(
                     $"No service sources are configured: '{Raw.Literal(ServicesKey)}' is empty in every configuration source, " +
                     $"so no service has a source — including '{new Name(serviceName)}'. " +
-                    $"Create '{Raw.Escaped(FilePath)}' ({Raw.Escaped(FileFound ? "found, but it configures no services" : "not found")}) with " +
+                    $"Create '{Raw.Display(FilePath)}' ({Raw.Escaped(FileFound ? "found, but it configures no services" : "not found")}) with " +
                     $"{{ \"services\": {{ \"{new Name(serviceName)}\": {{ \"source\": \"...\" }} }} }}, " +
                     $"or set the environment variable {Raw.Escaped(EnvironmentVariableFor(serviceName))}. " +
                     $"Sources consulted: that file, appsettings.json, appsettings.{{Environment}}.json, user secrets, " +

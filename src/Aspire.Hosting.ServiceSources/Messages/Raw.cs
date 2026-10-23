@@ -25,8 +25,9 @@ internal readonly struct Raw
 
     /// <summary>
     /// Caller-controlled text escaped by the <see cref="Name"/> rule but deliberately not capped —
-    /// a URL or a filesystem path, where truncating at 64 would remove the diagnosis the message
-    /// exists to give.
+    /// a URL, where truncating at 64 would remove the diagnosis the message exists to give. A
+    /// filesystem path in text a person reads goes through <see cref="Display"/> instead, since this
+    /// doubles every backslash.
     /// </summary>
     /// <remarks>
     /// Safe by the same rule as a <see cref="Name"/> hole, not by being trusted: this escapes its
@@ -120,12 +121,10 @@ internal readonly struct Raw
     /// parameter makes that conversion <c>CS0123</c>/<c>CS0411</c>, which is an error in every
     /// workflow — including the two that build without <c>-warnaserror</c>.
     /// <para>
-    /// What it does not close, measured rather than assumed: a two-argument delegate that names this
-    /// type explicitly still binds, and <c>Enumerable.Zip</c> supplies exactly that shape. A
-    /// <c>ref struct</c> would not fix it — <c>Func</c> declares <c>allows ref struct</c> on net9 and
-    /// later, so it closes Zip on net8.0 alone. Every residual shape costs an author a token that has
-    /// no reason to exist; the realistic slip is the single-argument projection, and that is refused.
+    /// It is a <c>ref struct</c> so the two-argument shape <c>Enumerable.Zip</c> supplies is refused
+    /// as well: <c>Func</c> accepts a ref struct type argument, but a collection element or a
+    /// <c>Zip</c> type parameter cannot be one.
     /// </para>
     /// </remarks>
-    internal readonly struct ConstantOnly;
+    internal readonly ref struct ConstantOnly;
 }

@@ -26,7 +26,24 @@ cloned and checked out under the AppHost's directory. Windows itself must still 
 the tools that later read those files (`LongPathsEnabled`), and a shorter AppHost location helps
 either way. Clones are staged in `.servicesources/checkouts/.incoming-<8 hex>` and renamed into
 place; a staging directory left by a clone that was killed is removed the next time any clone starts
-in that folder, so you can also delete it by hand.
+in that folder (the clone's log says so), so you can also delete it by hand. Each managed clone also
+has `core.longpaths=true` in its own git config, so plain `git status` and your IDE work in it too.
+
+### `cannot clone into …: git for Windows cannot write a pack file past 259 characters`
+
+`core.longpaths` does not cover pack files: git fails to write one whose whole path passes 259
+characters, whatever `LongPathsEnabled` says. The longest is the temporary pack a repack writes,
+`.git\objects\pack\.tmp-<pid>-pack-<hash>.pack` (up to 85 characters below the clone root, against
+69 for a plain `pack-<hash>.pack`). A clone repacks when it borrows objects from the main worktree's
+checkout, and `git gc --auto` repacks during later fetches, so the check sizes every clone for it.
+Because clones are staged in `<AppHost>\.servicesources\checkouts\.incoming-<8 hex>` (45 characters
+below the AppHost), an AppHost directory of more than about 129 characters cannot clone at all; a
+service name longer than the 18-character staging name lowers that further. For example, an AppHost
+at a 140-character path stages at 185 characters, so the repack would need 270 and the error asks
+for a path at least 11 characters shorter. The error names
+the length it needs and how many characters to remove; move the AppHost, or the worktree it is in,
+to a shorter path. Without this check git's own message is `unable to rename temporary '*.pack'
+file`.
 
 ## Getting the full exception detail
 

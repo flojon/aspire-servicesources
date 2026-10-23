@@ -39,8 +39,7 @@ internal sealed class CheckoutNameLock
 
     private readonly Dictionary<string, SemaphoreSlim> _semaphores = new(StringComparer.Ordinal);
 
-    // Plain object rather than System.Threading.Lock: this package still targets net8.0.
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     public static CheckoutNameLock For(IDistributedApplicationBuilder builder) =>
         Cache.GetValue(builder, static _ => new CheckoutNameLock());

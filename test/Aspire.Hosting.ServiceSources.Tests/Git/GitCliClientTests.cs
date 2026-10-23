@@ -475,4 +475,18 @@ public class GitCliClientTests
 
         Assert.Contains("core.longpaths=true", File.ReadAllText(trace), StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void Clone_PersistsLongPathsInTheCloneConfigOnlyOnWindows(bool isWindows, bool persisted)
+    {
+        var destination = TestRepository.EmptyDestination();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows)
+            .Clone(TestRepository.CreateOrigin().Path, destination);
+
+        var config = File.ReadAllText(Path.Combine(destination, ".git", "config"));
+        Assert.Equal(persisted, config.Contains("longpaths = true", StringComparison.OrdinalIgnoreCase));
+    }
 }

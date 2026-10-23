@@ -158,8 +158,8 @@ internal sealed class PathSource(
         if (!Directory.Exists(confined))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': path '{Raw.Escaped(definition.Path!)}' does not exist under "
-                + $"'{Raw.Escaped(appHostDirectory)}'. A 'path' service names a directory that should already be "
+                $"Service '{new Name(serviceName)}': path '{Raw.Display(definition.Path!)}' does not exist under "
+                + $"'{Raw.Display(appHostDirectory)}'. A 'path' service names a directory that should already be "
                 + $"checked out beside the AppHost — there is nothing here to clone. If this service actually "
                 + $"lives in a separate repository, give it a 'repository:' instead (or add one alongside "
                 + $"'path:' so each developer can pick).");
@@ -218,11 +218,11 @@ internal sealed class PathSource(
 
         var (boundary, escapeRemedy) = root.Kind switch
         {
-            ConfinementRootKind.Git => (Raw.Compose($"the repository at '{Raw.Escaped(root.Directory)}'"), (Raw?)null),
+            ConfinementRootKind.Git => (Raw.Compose($"the repository at '{Raw.Display(root.Directory)}'"), (Raw?)null),
             ConfinementRootKind.Configured => (
-                Raw.Compose($"the repository root '{Raw.Escaped(root.Directory)}' set by '{Raw.Literal(DeveloperConfiguration.RepositoryRootKey)}'"),
+                Raw.Compose($"the repository root '{Raw.Display(root.Directory)}' set by '{Raw.Literal(DeveloperConfiguration.RepositoryRootKey)}'"),
                 null),
-            _ => (Raw.Compose($"the AppHost directory '{Raw.Escaped(root.Directory)}'"), NoRepositoryFoundRemedy()),
+            _ => (Raw.Compose($"the AppHost directory '{Raw.Display(root.Directory)}'"), NoRepositoryFoundRemedy()),
         };
 
         LocalProjectSource.ThrowIfBreached(
@@ -331,7 +331,7 @@ internal sealed class PathSource(
         if (!Directory.Exists(resolved))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"'{key}' is '{Raw.Escaped(value)}', which resolves to '{Raw.Escaped(resolved)}' — that directory does "
+                $"'{key}' is '{Raw.Display(value)}', which resolves to '{Raw.Display(resolved)}' — that directory does "
                 + $"not exist. It names the root of the repository the AppHost is in.");
         }
 
@@ -340,8 +340,8 @@ internal sealed class PathSource(
         if (IsOutside(appHostWithinRoot))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"'{key}' is '{Raw.Escaped(value)}', which resolves to '{Raw.Escaped(resolved)}' — that does not contain "
-                + $"the AppHost directory '{Raw.Escaped(appHost)}'. It names the root of the repository the AppHost is "
+                $"'{key}' is '{Raw.Display(value)}', which resolves to '{Raw.Display(resolved)}' — that does not contain "
+                + $"the AppHost directory '{Raw.Display(appHost)}'. It names the root of the repository the AppHost is "
                 + $"in, so it has to be the AppHost directory or one of the directories above it.");
         }
 

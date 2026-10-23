@@ -46,8 +46,6 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       - name: Cache NuGet packages
@@ -77,7 +75,7 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore -warnaserror
 
-      # LogFilePrefix rather than LogFileName: every project multi-targets net8/9/10, and a
+      # LogFilePrefix rather than LogFileName: every project can multi-target, and a
       # fixed file name makes each target framework overwrite the previous one's results.
       - name: Test
         run: dotnet test -c Release --no-build --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
@@ -236,8 +234,6 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       # Keyed apart from the `build` job's cache on purpose. The two jobs run concurrently, so
@@ -291,8 +287,6 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       # Its own key, for the reason spelled out on smoketest-container's cache: these jobs run
@@ -338,8 +332,6 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       - name: Cache NuGet packages
@@ -414,13 +406,9 @@ jobs:
           # version, warning as it goes, if the tags are not there to read.
           fetch-depth: 0
 
-      # The package the sample points at multi-targets net8.0/9.0/10.0 and codegen restores it,
-      # so install all three rather than rely on which target framework MSBuild settles on.
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       - uses: actions/setup-node@v7

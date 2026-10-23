@@ -35,7 +35,7 @@ internal sealed class ServiceSourcesWarnings
 {
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ServiceSourcesWarnings> Cache = new();
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private readonly List<Entry> _entries = [];
 

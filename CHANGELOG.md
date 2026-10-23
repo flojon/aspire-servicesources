@@ -18,6 +18,15 @@ never existed. Check the tag of the last release before adding one.
 
 ### Breaking
 
+- **The package no longer targets `net8.0` or `net9.0`; it targets `net10.0` only.** Both reach
+  end of support on 10 November 2026. An AppHost on net8.0 or net9.0 fails to restore this
+  version with a target-framework incompatibility. Move the AppHost to .NET 10, or stay on 0.8.x,
+  which keeps all three targets.
+
+## [0.8.0] - 2026-10-23
+
+### Breaking
+
 - **Deferred checkout is now the default for a cold `"repository"` service; `UseDeferredCheckout()` is
   obsolete** ([#216]). A service whose managed clone does not exist yet used to block
   `AddService()` until the checkout landed; it now registers stopped and starts once the clone
@@ -122,13 +131,19 @@ never existed. Check the tag of the last release before adding one.
   An unanswered dialog does not hang the AppHost: closing it, or no answer within 5 minutes, starts
   every service that was waiting on it, as before, and saves nothing. A run with no dashboard to ask
   through never prompts and starts every service that has no saved choice, and so does a run where
-  the `CI` environment variable is set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or
-  `false` to never be asked). A saved choice made for a different repository than the service now
+  any of the `CI`, `TF_BUILD` (Azure Pipelines) or `JENKINS_URL` (Jenkins) environment variables is
+  set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or `false` to never be asked). A saved choice made for a different repository than the service now
   points at is asked about again. A warm checkout, a `path`
   override, `aspire publish` and `SetCheckoutTiming(CheckoutTiming.Eager)` are unchanged and never
   prompt. A service that `WaitFor`s a skipped service keeps waiting; the dialog lists what waits on
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
+
+  Until a deferred service is ready, `aspire resource <name> start`, `stop`, `restart` and `rebuild` are refused
+  with a message saying why ([#473], [#480]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
+  enabled on a `Skipped` service to show that message. A Start or Rebuild refused while the service is still
+  on its way leaves it as it was: it still starts by itself once ready, and anything that
+  `WaitFor`s or `WaitForCompletion`s it keeps waiting instead of failing.
 
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
   the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
@@ -142,7 +157,27 @@ never existed. Check the tag of the last release before adding one.
   composition-time launch-profile fidelity; `SetCheckoutTiming(CheckoutTiming.Eager)`, `aspire
   publish` and kinds that cannot defer are unchanged.
 
+  While the dialog is open, and after Skip, Start is refused rather than running the service
+  without the step you were asked to approve ([#473]).
+
 ### Fixed
+
+- **Start no longer runs a deferred service that is still checking out or preparing, and the dashboard
+  no longer offers a Stop that fails with a raw DCP 404** ([#473], [#480]). A Start sent while the
+  service showed `Checking out` or `Preparing` reported success and ran against a checkout that was
+  not ready; it is now refused with a message saying so, and the dashboard hides Stop and disables
+  Restart for those states, and for the other pre-start states, where Stop used to fail because nothing was
+  running.
+
+- **Checkout progress lines show paths as written** ([#481]). `Resolving checkout of … into …` and
+  `Checkout ready at …` showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows
+  path; they now read as the path on disk.
+
+- **Configuration errors show file paths as written** ([#486]). The "no source configured" error and the
+  other messages that name a file or directory on this machine (a misspelled root key, a missing
+  launch settings file, a `path` service that does not exist, a worktree path override, and the like)
+  showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows path; they now read as
+  the path on disk. Values you typed into the configuration are still echoed escaped.
 
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
@@ -156,7 +191,11 @@ never existed. Check the tag of the last release before adding one.
   32-character GUID, and a staging directory whose clone died is removed by the next clone in that
   `checkouts` folder instead of after 24 hours. A clone still running in another AppHost is never
   touched, and read-only files git leaves in `.git` no longer block the cleanup. See
-  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows). A clone whose pack files —
+  including the temporary ones git writes when it repacks to borrow objects or during a later
+  fetch — would pass `MAX_PATH`, which `core.longpaths` cannot fix, is now refused up front with the
+  length it needs and the fix, each clone keeps `core.longpaths=true` in its own config, and the sweep logs
+  each leftover it removes ([#474]).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
   share a `ProjectReference` ran two builds over the same output directory and one failed
@@ -1969,7 +2008,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/flojon/aspire-servicesources/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/flojon/aspire-servicesources/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...v0.5.1
@@ -2077,8 +2117,13 @@ Targets `net10.0`.
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
+[#473]: https://github.com/flojon/aspire-servicesources/issues/473
+[#474]: https://github.com/flojon/aspire-servicesources/issues/474
+[#480]: https://github.com/flojon/aspire-servicesources/issues/480
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
+[#481]: https://github.com/flojon/aspire-servicesources/issues/481
+[#486]: https://github.com/flojon/aspire-servicesources/issues/486

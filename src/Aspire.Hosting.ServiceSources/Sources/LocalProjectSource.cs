@@ -735,7 +735,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         if (!File.Exists(projectPath))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': project file '{Raw.Escaped(project)}' was not found under '{Raw.Escaped(repoRoot)}'.");
+                $"Service '{new Name(serviceName)}': project file '{Raw.Escaped(project)}' was not found under '{Raw.Display(repoRoot)}'.");
         }
 
         return projectPath;

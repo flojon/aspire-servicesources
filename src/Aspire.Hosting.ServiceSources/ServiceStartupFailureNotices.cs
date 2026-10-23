@@ -101,8 +101,7 @@ internal sealed class ServiceStartupFailureNotices
         public int? StoppedExitCode { get; set; }
     }
 
-    // Plain object rather than System.Threading.Lock: this package still targets net8.0.
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private bool _subscribed;
 

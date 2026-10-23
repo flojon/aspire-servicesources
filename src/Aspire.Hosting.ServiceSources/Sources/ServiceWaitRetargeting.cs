@@ -29,7 +29,7 @@ internal sealed class ServiceWaitRetargeting
 {
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ServiceWaitRetargeting> Cache = new();
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private bool _subscribed;
 
     public static void EnsureSubscribed(IDistributedApplicationBuilder builder) =>

@@ -53,8 +53,7 @@ internal static class BackingServiceConfigAudit
     /// </summary>
     private sealed class Declared
     {
-        // Plain object rather than System.Threading.Lock: this package still targets net8.0.
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         /// <summary>
         /// Compared the way configuration compares keys, so that an entry written <c>Orders-DB</c>
@@ -209,7 +208,7 @@ internal static class BackingServiceConfigAudit
     /// </remarks>
     private static Raw MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
         Raw.Compose(
-            $"'{Raw.Escaped(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName))}' has a top-level key "
+            $"'{Raw.Display(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName))}' has a top-level key "
             + $"'{new Name(nearMiss)}', and no '{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}' key. Did you mean "
             + $"'{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}'? Nothing read it, so nothing in it configured "
             + $"anything — every backing service this AppHost adds takes its source from elsewhere, and any that has "
