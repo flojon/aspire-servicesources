@@ -62,7 +62,7 @@ public class DeveloperConfigValidatorTests
 
     /// <summary>
     /// The repository half of the same walk (#291) — validated inside the same
-    /// <c>ResolveService</c> call as the service entries, via <c>DeveloperConfiguration.ReadFrom</c>,
+    /// <c>ResolveServiceOrNotConfigured</c> call as the service entries, via <c>DeveloperConfiguration.ReadFrom</c>,
     /// so <see cref="Load"/> already reaches it; no third helper is needed.
     /// </summary>
     [Fact]

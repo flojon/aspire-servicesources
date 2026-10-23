@@ -38,5 +38,5 @@ internal static class UnconfiguredSource
     // Kept free of file paths and of anything that assumes how the source gets chosen.
     private static string Reason(string serviceName) =>
         Raw.Compose($"No source has been chosen for this service. Set " +
-            $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{new Name(serviceName)}:source'.").ToString();
+            $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{Raw.Escaped(serviceName)}:source'.").ToString();
 }

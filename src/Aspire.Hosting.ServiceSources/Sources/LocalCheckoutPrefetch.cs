@@ -672,7 +672,7 @@ internal sealed class LocalCheckoutPrefetch
         catch (ServiceSourcesConfigurationException)
         {
             // Speculation must never be the thing that fails the AddService call. A config problem
-            // real enough to matter is reported by ResolveService, against the service the AppHost
+            // real enough to matter is reported by ResolveServiceOrNotConfigured, against the service the AppHost
             // actually asked for; here it just means there is nothing to prefetch.
             return;
         }

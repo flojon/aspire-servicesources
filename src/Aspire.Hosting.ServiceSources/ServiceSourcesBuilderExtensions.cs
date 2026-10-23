@@ -115,8 +115,8 @@ public static class ServiceSourcesBuilderExtensions
 
         // Resolved once here rather than inside each source: the source that actually reads it
         // must not depend on ServiceSourcesConfigCache.LoadedFor by itself, which would tie its unit
-        // tests to the whole catalog-loading pipeline that ResolveService just walked above. This is
-        // a cache hit off the same instance ResolveService populated.
+        // tests to the whole catalog-loading pipeline that ResolveServiceOrNotConfigured just walked above. This is
+        // a cache hit off the same instance ResolveServiceOrNotConfigured populated.
         var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
             .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
 
@@ -143,7 +143,7 @@ public static class ServiceSourcesBuilderExtensions
             // Names the alternatives rather than saying "not implemented yet": the lookup folds
             // case, so reaching here means the name itself is unknown — not that the source exists
             // under a different spelling, which is what the old wording sent readers looking for.
-            // An entry with no source at all never arrives here; ResolveService reports that
+            // An entry with no source at all never arrives here; ResolveServiceOrNotConfigured reports that
             // separately, against the key that would set it.
             var known = Raw.Join(", ", Sources.Keys.Order(StringComparer.Ordinal).Select(s => Raw.Compose($"'{new Name(s)}'")));
 

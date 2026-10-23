@@ -85,7 +85,7 @@ public class CatalogErrorMessageTests
         {
             var dir = TempDirectories.CreateSubdirectory().FullName;
             // A developer selection is required to reach KubernetesSource at all — an entry with no
-            // 'source' fails at ResolveService's own NotConfiguredError first, which never mentions
+            // 'source' fails at ResolveServiceOrNotConfigured's own NotConfiguredError first, which never mentions
             // servicesources.yaml either way but also never exercises the code this test targets.
             File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
                 """{ "services": { "svc": { "source": "kubernetes" } } }""");
