@@ -102,7 +102,7 @@ internal sealed class DeferredCheckout
     /// </summary>
     private static readonly TimeSpan ProgressPublishInterval = TimeSpan.FromSeconds(1);
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private readonly List<Deferred> _deferred = [];
 

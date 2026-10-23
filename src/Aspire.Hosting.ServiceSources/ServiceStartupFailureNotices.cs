@@ -101,7 +101,7 @@ internal sealed class ServiceStartupFailureNotices
         public int? StoppedExitCode { get; set; }
     }
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private bool _subscribed;
 

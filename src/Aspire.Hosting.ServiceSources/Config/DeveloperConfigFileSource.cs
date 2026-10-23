@@ -112,7 +112,7 @@ internal static class DeveloperConfigFileSource
     /// </summary>
     private sealed class Registration
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         private bool _registered;
 

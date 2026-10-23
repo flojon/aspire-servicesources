@@ -34,7 +34,7 @@ internal static class ServiceSourcesConfigCache
 
     internal sealed class CodeCatalogAccumulator
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         private bool _frozen;
 
@@ -191,7 +191,7 @@ internal static class ServiceSourcesConfigCache
     private sealed class ConfigLoader<T>
         where T : class
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
 
         private T? _loaded;
 
