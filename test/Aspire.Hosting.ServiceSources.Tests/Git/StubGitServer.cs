@@ -120,7 +120,7 @@ internal sealed class StubGitServer : IDisposable
     /// Picks a port and binds it, retrying on a fresh port if the bind fails. <see cref="FreePort"/>
     /// releases its probe socket before <paramref name="bind"/> claims the same port, leaving a
     /// window where something else — including a sibling TFM's copy of this same test, since the
-    /// suite runs net8/9/10 concurrently — can take it first. The window can't be closed, only
+    /// suite runs several test processes concurrently — can take it first. The window can't be closed, only
     /// tolerated: retry a bounded number of times rather than let the collision fail the test.
     /// </summary>
     internal static int BindToFreePort(Func<int> pickPort, Action<int> bind, int maxAttempts = 5)

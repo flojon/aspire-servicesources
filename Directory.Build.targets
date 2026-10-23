@@ -5,7 +5,7 @@
     net11-preview.yml compiles and tests against the preview framework itself rather than only
     building the shipped frameworks under a preview SDK.
 
-    Off by default, so the TargetFrameworks that pack and publish read are the shipped three and
+    Off by default, so the TargetFrameworks that pack and publish read are the shipped ones and
     nothing here reaches a released package.
 
     Lives in .targets rather than .props because it appends to $(TargetFrameworks), which each
@@ -32,7 +32,7 @@
     surface a package to non-C# AppHosts, which is the audience the ATS exports exist for.
 
     It never reached a packed nuspec. obj/*.nuget.g.targets imports Aspire.Hosting.targets only
-    inside its per-framework ImportGroups ('$(TargetFramework)' == 'net8.0' and so on), while
+    inside its per-framework ImportGroups ('$(TargetFramework)' == 'net10.0' and so on), while
     pack generates the nuspec from the cross-targeting outer pass, where $(TargetFramework) is
     empty and that import does not happen. The tag was appended three times, once per inner
     build, and each time to a property no nuspec was ever generated from.

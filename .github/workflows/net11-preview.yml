@@ -1,6 +1,6 @@
 name: .NET 11 preview smoke test
 
-# Looks ahead at the next .NET, in two ways at once: that the shipped net8/9/10 build and tests
+# Looks ahead at the next .NET, in two ways at once: that the shipped net10 build and tests
 # still work when a preview SDK is the one compiling them, and that the code actually compiles
 # and passes when targeting net11.0 itself.
 #
@@ -49,13 +49,11 @@ jobs:
           # MinVer reads tags to version the package projects.
           fetch-depth: 0
 
-      # Both SDK sets are installed, and in this order: the released ones provide the targeting
-      # packs for net8/9/10, and the preview goes last so it is the SDK that drives the build.
+      # Both SDK sets are installed, and in this order: the released one provides the targeting
+      # pack for net10, and the preview goes last so it is the SDK that drives the build.
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
 
       - uses: actions/setup-dotnet@v6

@@ -1,11 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
-    <!-- [OverloadResolutionPriority] on the WithCommand shadow is C# 13; net9.0/net10.0 already
-         default to it or later. This only makes the package declare the attribute — a net8.0
-         consumer needs C# 13 of its own to honour it, exactly as it does against Aspire's own pair. -->
-    <LangVersion Condition="'$(TargetFramework)' == 'net8.0'">13.0</LangVersion>
+    <TargetFrameworks>net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- Raw.Literal/Join take [ConstantExpected] strings, and CA1857 is the only thing enforcing
@@ -57,7 +53,7 @@
        AppHost that picks this package up through a shared conventions package. The directory here
        is named to match the package path for the same reason.
 
-       Requires NuGet 5.0 or later, which every client able to restore a net8.0 package has. -->
+       Requires NuGet 5.0 or later, which every client able to restore a net10.0 package has. -->
   <ItemGroup>
     <None Include="buildTransitive\$(PackageId).targets" Pack="true"
           PackagePath="buildTransitive\$(PackageId).targets" />

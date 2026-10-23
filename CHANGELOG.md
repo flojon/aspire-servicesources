@@ -16,6 +16,13 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Breaking
+
+- **The package no longer targets `net8.0` or `net9.0`; it targets `net10.0` only.** Both reach
+  end of support on 10 November 2026. An AppHost on net8.0 or net9.0 fails to restore this
+  version with a target-framework incompatibility. Move the AppHost to .NET 10, or stay on 0.8.x,
+  which keeps all three targets.
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking

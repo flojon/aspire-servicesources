@@ -82,7 +82,6 @@ internal static class WorktreeHome
 
     private sealed class Slot
     {
-        // Plain object rather than System.Threading.Lock: this package still targets net8.0.
         private readonly object _gate = new();
         private IWorktreeProbe _probe = new GitWorktreeProbe();
         private bool _resolved;
