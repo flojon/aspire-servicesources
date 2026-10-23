@@ -17,6 +17,24 @@ public class PackPathLimitTests
     private static string StagingFor(string root) => RootOfLength(Math.Min(root.Length, PackPathLimit.MaxCloneRootLength));
 
     [Fact]
+    public void Limit_IsSizedForTheRepacksTemporaryPack()
+    {
+        Assert.Equal(85, PackPathLimit.LongestPackSuffixLength);
+        Assert.Equal(174, PackPathLimit.MaxCloneRootLength);
+    }
+
+    [Fact]
+    public void RootThatFitsAPlainPackButNotTheRepack_IsRefused()
+    {
+        var root = RootOfLength(PackPathLimit.MaxPathLength - 69);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => PackPathLimit.EnsureFits(Label, root, root, isWindows: true));
+
+        Assert.Contains("at least 16 characters shorter", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RootAtTheLimit_Passes()
     {
         var root = RootOfLength(PackPathLimit.MaxCloneRootLength);
@@ -37,6 +55,8 @@ public class PackPathLimitTests
         Assert.Contains((PackPathLimit.MaxPathLength + 1).ToString(), ex.Message, StringComparison.Ordinal);
         Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Move the AppHost", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(@"\.git\objects\pack\.tmp-<pid>-pack-<hash>.pack", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("repack", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

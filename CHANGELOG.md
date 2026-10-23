@@ -170,9 +170,10 @@ never existed. Check the tag of the last release before adding one.
   32-character GUID, and a staging directory whose clone died is removed by the next clone in that
   `checkouts` folder instead of after 24 hours. A clone still running in another AppHost is never
   touched, and read-only files git leaves in `.git` no longer block the cleanup. See
-  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows). A clone whose pack file would
-  pass `MAX_PATH` — which `core.longpaths` cannot fix — is now refused up front with the length it
-  needs and the fix, each clone keeps `core.longpaths=true` in its own config, and the sweep logs
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows). A clone whose pack files —
+  including the temporary ones git writes when it repacks to borrow objects or during a later
+  fetch — would pass `MAX_PATH`, which `core.longpaths` cannot fix, is now refused up front with the
+  length it needs and the fix, each clone keeps `core.longpaths=true` in its own config, and the sweep logs
   each leftover it removes ([#474]).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
