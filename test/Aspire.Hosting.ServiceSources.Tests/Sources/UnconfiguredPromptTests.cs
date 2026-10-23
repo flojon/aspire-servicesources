@@ -13,6 +13,7 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 [Trait("IO", "true")]
+[Trait("Concurrency", "true")]
 [Trait("Timing", "true")]
 public class UnconfiguredPromptTests
 {
@@ -185,6 +186,42 @@ public class UnconfiguredPromptTests
     }
 
     [Fact]
+    public async Task Run_NotificationsNotDismissed_RunCompletes_BothRaisedInOrder()
+    {
+        var interaction = Answering(["kubernetes", "repository"], (_, inputs) => Fill(inputs, " dev ", "80"));
+        interaction.HoldNotifications = true;
+
+        try
+        {
+            await RunAsync(interaction, [Orders(), Billing()]);
+
+            Assert.Equal(
+                [MessageIntent.Success, MessageIntent.Error],
+                interaction.Notifications.Select(n => n.Options?.Intent));
+        }
+        finally
+        {
+            interaction.ReleaseNotifications();
+        }
+    }
+
+    [Fact]
+    public async Task Run_EveryServiceLeftBlank_LogsOneLineNamingThem_NoNotification()
+    {
+        var interaction = Answering([null, " "]);
+
+        var (dir, logger) = await RunAsync(interaction, [Orders(), Billing()]);
+
+        Assert.False(File.Exists(LocalJson(dir)));
+        Assert.Empty(interaction.Notifications);
+
+        var line = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, line.Level);
+        Assert.Contains("orders", line.Message);
+        Assert.Contains("billing", line.Message);
+    }
+
+    [Fact]
     public async Task Run_DialogClosed_WritesNothing_LogsOneLineNamingPlaceholders_NotReRaised()
     {
         var interaction = new FakeInteractionService
@@ -273,6 +310,9 @@ public class UnconfiguredPromptTests
               inventory:
                 url:
                   url: https://inventory.example.com
+              stock:
+                url:
+                  url: https://stock.example.com
               orders:
                 repository: https://example.com/orders.git
                 project: Service.csproj
@@ -318,13 +358,15 @@ public class UnconfiguredPromptTests
         };
         var builder = Builder(CatalogDirectory(), withPlaceholder);
         builder.AddService("inventory");
+        builder.AddService("stock");
 
         await PublishBeforeStartAsync(builder);
         await Task.WhenAll(UnconfiguredRegistry.For(builder).PromptTasks).WaitAsync(Patience);
 
+        Assert.Single(UnconfiguredRegistry.For(builder).PromptTasks);
         Assert.Equal(1, withPlaceholder.PromptCount);
         Assert.Equal(UnconfiguredPrompt.Title, withPlaceholder.Title);
-        Assert.Equal(["inventory"], withPlaceholder.Inputs.Select(i => i.Label));
+        Assert.Equal(["inventory", "stock"], withPlaceholder.Inputs.Select(i => i.Label));
 
         var withoutPlaceholder = new FakeInteractionService { IsAvailable = true };
         var configured = Builder(
@@ -349,6 +391,18 @@ public class UnconfiguredPromptTests
         Assert.Equal(0, switchedOff.PromptCount);
         Assert.Contains(log, entry => entry.Level == LogLevel.Warning
             && entry.Message.Contains("ServiceSources:Services:inventory:source"));
+    }
+
+    [Fact]
+    public void Resolve_DuplicateNameThatThrows_IsRecordedOnce()
+    {
+        var builder = Builder(CatalogDirectory(), new FakeInteractionService());
+        var definition = Definition("inventory");
+
+        UnconfiguredSource.Resolve(builder, "inventory", definition);
+        Assert.ThrowsAny<Exception>(() => UnconfiguredSource.Resolve(builder, "inventory", definition));
+
+        Assert.Single(UnconfiguredRegistry.For(builder).Services);
     }
 
     [Fact]

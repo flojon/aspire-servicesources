@@ -199,6 +199,17 @@ internal sealed class FakeInteractionService : IInteractionService
         string title, string message, MessageBoxInteractionOptions? options = null,
         CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
+    /// <summary>
+    /// Keeps every notification open until <see cref="ReleaseNotifications"/>, as the real service does
+    /// until the user dismisses it.
+    /// </summary>
+    public bool HoldNotifications { get; set; }
+
+    private readonly TaskCompletionSource<InteractionResult<bool>> _notificationsReleased =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public void ReleaseNotifications() => _notificationsReleased.TrySetResult(InteractionResult.Ok(true));
+
     public Task<InteractionResult<bool>> PromptNotificationAsync(
         string title, string message, NotificationInteractionOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -208,7 +219,7 @@ internal sealed class FakeInteractionService : IInteractionService
             _notifications.Add(new RecordedNotification(title, message, options));
         }
 
-        return Task.FromResult(InteractionResult.Ok(true));
+        return HoldNotifications ? _notificationsReleased.Task : Task.FromResult(InteractionResult.Ok(true));
     }
 
     public Task<InteractionResult<InteractionInput>> PromptInputAsync(

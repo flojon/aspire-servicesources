@@ -25,8 +25,6 @@ internal static class UnconfiguredSource
     public static IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition)
     {
-        UnconfiguredRegistry.For(builder).Record(builder, serviceName, definition);
-
         var real = builder.AddResource(new UnconfiguredServiceResource(serviceName))
             .WithInitialState(new CustomResourceSnapshot
             {
@@ -34,6 +32,9 @@ internal static class UnconfiguredSource
                 State = new ResourceStateSnapshot(StateText, KnownResourceStateStyles.Info),
                 Properties = [new ResourcePropertySnapshot("Reason", Reason(serviceName))],
             });
+
+        // After AddResource, so a duplicate name that throws there is never asked about twice.
+        UnconfiguredRegistry.For(builder).Record(builder, serviceName, definition);
 
         return ResolvedService.Bridge(real, serviceName, SourceName);
     }

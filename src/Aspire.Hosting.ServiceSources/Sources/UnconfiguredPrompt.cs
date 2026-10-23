@@ -112,6 +112,7 @@ internal static class UnconfiguredPrompt
 
         var saved = new List<Raw>();
         var failed = new List<Raw>();
+        var answered = 0;
 
         for (var i = 0; i < unconfigured.Count; i++)
         {
@@ -119,6 +120,8 @@ internal static class UnconfiguredPrompt
             {
                 continue;
             }
+
+            answered++;
 
             var outcome = await SaveOneAsync(
                 interaction, services, unconfigured[i], input.Value.Trim(), writer, logger, token).ConfigureAwait(false);
@@ -138,7 +141,16 @@ internal static class UnconfiguredPrompt
             }
         }
 
-        await NotifyAsync(interaction, saved, failed, token).ConfigureAwait(false);
+        if (answered == 0)
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"No source was chosen in the source dialog, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. "
+                + $"Set '{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<name>:source' to configure them.");
+            return;
+        }
+
+        Notify(interaction, saved, failed, logger, token);
     }
 
     private sealed record Outcome(bool Saved, Raw Line);
@@ -262,29 +274,66 @@ internal static class UnconfiguredPrompt
         return answers;
     }
 
-    private static async Task NotifyAsync(
-        IInteractionService interaction, List<Raw> saved, List<Raw> failed, CancellationToken token)
+    // Raised, not awaited: a notification completes only when dismissed, and nothing here depends on that.
+    private static void Notify(
+        IInteractionService interaction, List<Raw> saved, List<Raw> failed, ILogger logger, CancellationToken token)
     {
         if (saved.Count > 0)
         {
-            await interaction.PromptNotificationAsync(
-                    "Source saved",
-                    Raw.Compose($"Saved {Raw.Join("; ", saved)} to {Raw.Literal(DeveloperConfiguration.FileName)}. "
-                        + $"This run is unchanged; the choice takes effect the next time the AppHost starts.").ToString(),
-                    new NotificationInteractionOptions { Intent = MessageIntent.Success, EnableMessageMarkdown = false },
-                    token)
-                .ConfigureAwait(false);
+            Raise(
+                interaction,
+                "Source saved",
+                Raw.Compose($"Saved {Raw.Join("; ", saved)} to {Raw.Literal(DeveloperConfiguration.FileName)}. "
+                    + $"This run is unchanged; the choice takes effect the next time the AppHost starts."),
+                MessageIntent.Success,
+                logger,
+                token);
         }
 
         if (failed.Count > 0)
         {
-            await interaction.PromptNotificationAsync(
-                    "Source not saved",
-                    Raw.Compose($"Not saved: {Raw.Join("; ", failed)}").ToString(),
-                    new NotificationInteractionOptions { Intent = MessageIntent.Error, EnableMessageMarkdown = false },
-                    token)
-                .ConfigureAwait(false);
+            Raise(
+                interaction, "Source not saved", Raw.Compose($"Not saved: {Raw.Join("; ", failed)}"),
+                MessageIntent.Error, logger, token);
         }
+    }
+
+    private static void Raise(
+        IInteractionService interaction, string title, Raw message, MessageIntent intent, ILogger logger,
+        CancellationToken token)
+    {
+        Task shown;
+
+        try
+        {
+            shown = interaction.PromptNotificationAsync(
+                title,
+                message.ToString(),
+                new NotificationInteractionOptions { Intent = intent, EnableMessageMarkdown = false },
+                token);
+        }
+        catch (Exception ex)
+        {
+            shown = Task.FromException(ex);
+        }
+
+        _ = shown.ContinueWith(
+            static (task, state) =>
+            {
+                try
+                {
+                    ServiceSourcesLog.Warning(
+                        (ILogger)state!, $"A source notification could not be shown: {Raw.Cause(task.Exception!.GetBaseException())}");
+                }
+                catch (Exception)
+                {
+                    // Logging is already gone; the host is going down.
+                }
+            },
+            logger,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>One warning naming every service and the key that would configure it.</summary>
