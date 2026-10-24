@@ -88,7 +88,7 @@ internal sealed class ContainerSource : IServiceSource
                     $"Service '{new Name(serviceName)}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
         }
 
-        var tag = string.IsNullOrWhiteSpace(config.Container.Tag) ? definition.Container.DefaultTag : config.Container.Tag;
+        var tag = string.IsNullOrWhiteSpace(config.Container.Tag) ? definition.Container?.DefaultTag : config.Container.Tag;
 
         return (image, tag, port);
     }

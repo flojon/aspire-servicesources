@@ -12,7 +12,7 @@ public class SourceChoicesTests
         string? image = "ghcr.io/company/orders", int? port = 8080) =>
         new ServiceMetadata
         {
-            Repository = repository,
+            Repository = repository ?? "",
             Project = "Orders.csproj",
             Container = container ? new ContainerMetadata { Image = image!, Port = port } : null,
             Kubernetes = kubernetes ? new KubernetesMetadata { Service = "orders", Port = 80 } : null,

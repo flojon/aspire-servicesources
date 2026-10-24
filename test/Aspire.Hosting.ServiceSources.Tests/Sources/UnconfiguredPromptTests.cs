@@ -363,7 +363,7 @@ public class UnconfiguredPromptTests
         await PublishBeforeStartAsync(builder);
         await Task.WhenAll(UnconfiguredRegistry.For(builder).PromptTasks).WaitAsync(Patience);
 
-        Assert.Single(UnconfiguredRegistry.For(builder).PromptTasks);
+        _ = Assert.Single(UnconfiguredRegistry.For(builder).PromptTasks);
         Assert.Equal(1, withPlaceholder.PromptCount);
         Assert.Equal(UnconfiguredPrompt.Title, withPlaceholder.Title);
         Assert.Equal(["inventory", "stock"], withPlaceholder.Inputs.Select(i => i.Label));
