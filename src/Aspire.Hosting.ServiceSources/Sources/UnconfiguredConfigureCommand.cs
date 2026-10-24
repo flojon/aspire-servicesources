@@ -10,7 +10,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <summary>
 /// The placeholder's <c>Configure</c> command: the startup dialog, for this one service, on demand.
 /// </summary>
-internal sealed class UnconfiguredConfigureCommand(Unconfigured service, IDeveloperConfigWriter writer)
+internal sealed class UnconfiguredConfigureCommand(
+    Unconfigured service, IDeveloperConfigWriter writer, string appHostDirectory)
 {
     public const string Name = "configure";
 
@@ -39,7 +40,8 @@ internal sealed class UnconfiguredConfigureCommand(Unconfigured service, IDevelo
 
         try
         {
-            await UnconfiguredPrompt.RunAsync(services, [service], writer, logger, cancellationToken).ConfigureAwait(false);
+            await UnconfiguredPrompt.RunAsync(services, [service], writer, appHostDirectory, logger, cancellationToken)
+                .ConfigureAwait(false);
             return cancellationToken.IsCancellationRequested
                 ? Failure("The source dialog was cancelled.")
                 : new ExecuteCommandResult { Success = true };

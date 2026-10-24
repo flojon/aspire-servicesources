@@ -103,7 +103,8 @@ internal sealed class UnconfiguredRegistry
 
         // Not awaited, and no deadline: startup must not wait on a person, and the prompt has
         // nothing to fall back to if it gives up.
-        var task = Task.Run(() => RunGuardedAsync(services, snapshot, writer, logger, stopping), CancellationToken.None);
+        var task = Task.Run(
+            () => RunGuardedAsync(services, snapshot, writer, appHostDirectory, logger, stopping), CancellationToken.None);
 
         lock (_gate)
         {
@@ -114,11 +115,12 @@ internal sealed class UnconfiguredRegistry
     /// <summary>Never throws: it runs on a task nobody awaits.</summary>
     private static async Task RunGuardedAsync(
         IServiceProvider services, IReadOnlyList<Unconfigured> snapshot, IDeveloperConfigWriter writer,
-        ILogger logger, CancellationToken stopping)
+        string appHostDirectory, ILogger logger, CancellationToken stopping)
     {
         try
         {
-            await UnconfiguredPrompt.RunAsync(services, snapshot, writer, logger, stopping).ConfigureAwait(false);
+            await UnconfiguredPrompt.RunAsync(services, snapshot, writer, appHostDirectory, logger, stopping)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
         {

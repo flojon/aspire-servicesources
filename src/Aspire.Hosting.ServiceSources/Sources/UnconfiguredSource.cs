@@ -26,7 +26,8 @@ internal static class UnconfiguredSource
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition)
     {
         var configure = new UnconfiguredConfigureCommand(
-            new Unconfigured(serviceName, definition), UnconfiguredRegistry.CreateWriter(builder.AppHostDirectory));
+            new Unconfigured(serviceName, definition), UnconfiguredRegistry.CreateWriter(builder.AppHostDirectory),
+            builder.AppHostDirectory);
 
         var real = builder.AddResource(new UnconfiguredServiceResource(serviceName))
             .WithCommand(

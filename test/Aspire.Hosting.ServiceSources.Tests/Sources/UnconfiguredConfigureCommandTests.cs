@@ -108,7 +108,7 @@ public class UnconfiguredConfigureCommandTests
 
         await UnconfiguredPrompt.RunAsync(
                 Services(Choosing("url")), UnconfiguredRegistry.For(pushBuilder).Services,
-                UnconfiguredRegistry.CreateWriter(pushDir), NullLogger.Instance, CancellationToken.None)
+                UnconfiguredRegistry.CreateWriter(pushDir), pushDir, NullLogger.Instance, CancellationToken.None)
             .WaitAsync(Patience);
 
         Assert.True(result.Success);
@@ -229,7 +229,7 @@ public class UnconfiguredConfigureCommandTests
 
         await UnconfiguredPrompt.RunAsync(
                 Services(interaction), UnconfiguredRegistry.For(builder).Services,
-                UnconfiguredRegistry.CreateWriter(dir), logger, CancellationToken.None)
+                UnconfiguredRegistry.CreateWriter(dir), dir, logger, CancellationToken.None)
             .WaitAsync(Patience);
 
         var line = Assert.Single(logger.Entries).Message;

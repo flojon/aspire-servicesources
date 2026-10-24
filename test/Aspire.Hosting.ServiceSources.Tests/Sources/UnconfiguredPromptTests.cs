@@ -69,7 +69,7 @@ public class UnconfiguredPromptTests
         var logger = new ListLogger();
 
         await UnconfiguredPrompt.RunAsync(
-                Services(interaction, configuration), services, new JsonFileDeveloperConfigWriter(dir), logger,
+                Services(interaction, configuration), services, new JsonFileDeveloperConfigWriter(dir), dir, logger,
                 CancellationToken.None)
             .WaitAsync(Patience);
 
@@ -250,7 +250,7 @@ public class UnconfiguredPromptTests
         using var stopping = new CancellationTokenSource();
 
         var run = UnconfiguredPrompt.RunAsync(
-            Services(interaction), [Orders()], new JsonFileDeveloperConfigWriter(dir), logger, stopping.Token);
+            Services(interaction), [Orders()], new JsonFileDeveloperConfigWriter(dir), dir, logger, stopping.Token);
 
         await interaction.Prompted.WaitAsync(Patience);
 
@@ -286,9 +286,8 @@ public class UnconfiguredPromptTests
     [Fact]
     public async Task Run_ShadowedByHigherLayer_StillSaves_NotificationNamesProvider()
     {
-        // Provider 0 stands in for the developer-config file's own layer.
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Add(new DeveloperConfigFileSource.FileLayerSource())
             .AddJsonStream(new MemoryStream("""{ "ServiceSources": { "Services": { "orders": { "source": "" } } } }"""u8.ToArray()))
             .Build();
         var interaction = Answering(["container"]);

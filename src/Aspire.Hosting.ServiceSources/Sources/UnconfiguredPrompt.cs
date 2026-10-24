@@ -63,6 +63,7 @@ internal static class UnconfiguredPrompt
         IServiceProvider services,
         IReadOnlyList<Unconfigured> unconfigured,
         IDeveloperConfigWriter writer,
+        string appHostDirectory,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -124,7 +125,8 @@ internal static class UnconfiguredPrompt
             answered++;
 
             var outcome = await SaveOneAsync(
-                interaction, services, unconfigured[i], input.Value.Trim(), writer, logger, token).ConfigureAwait(false);
+                interaction, services, unconfigured[i], input.Value.Trim(), writer, appHostDirectory, logger, token)
+                .ConfigureAwait(false);
 
             if (token.IsCancellationRequested)
             {
@@ -162,6 +164,7 @@ internal static class UnconfiguredPrompt
         Unconfigured service,
         string answer,
         IDeveloperConfigWriter writer,
+        string appHostDirectory,
         ILogger logger,
         CancellationToken token)
     {
@@ -191,7 +194,7 @@ internal static class UnconfiguredPrompt
             fields = answered;
         }
 
-        if (PickerAnswers.Validate(service.ServiceName, source, fields, service.Definition) is { } invalid)
+        if (PickerAnswers.Validate(service.ServiceName, source, fields, service.Definition, appHostDirectory) is { } invalid)
         {
             return Failed(logger, name, Raw.Output(invalid));
         }
