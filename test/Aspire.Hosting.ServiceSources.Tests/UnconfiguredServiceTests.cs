@@ -252,17 +252,11 @@ public class UnconfiguredServiceTests
         await notifications.WaitForDependenciesAsync(worker.Resource, cts.Token);
     }
 
-    [Fact]
+    [DcpFact]
     public async Task PlaceholderState_SurvivesAppStartup()
     {
-        // Needs a real DCP, which is not a package reference here: point these at dcp.exe and the
-        // dashboard executable (e.g. from the NuGet cache) to run it; without them it is a no-op.
-        var dcp = Environment.GetEnvironmentVariable("SERVICESOURCES_TEST_DCP_CLI");
-        var dashboard = Environment.GetEnvironmentVariable("SERVICESOURCES_TEST_DCP_DASHBOARD");
-        if (string.IsNullOrEmpty(dcp) || string.IsNullOrEmpty(dashboard))
-        {
-            return;
-        }
+        var dcp = Environment.GetEnvironmentVariable(DcpFactAttribute.CliVariable)!;
+        var dashboard = Environment.GetEnvironmentVariable(DcpFactAttribute.DashboardVariable)!;
 
         var builder = Builder();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
