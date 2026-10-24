@@ -200,13 +200,13 @@ public class JsonFileDeveloperConfigWriterTests
     public async Task Save_ExistingValues_AreNotEscapedAndFileEndsWithNewline()
     {
         var dir = NewDirectory();
-        File.WriteAllText(FileIn(dir), """{ "repositoryRoot": "едц <a&b> it's +" }""");
+        File.WriteAllText(FileIn(dir), """{ "repositoryRoot": "ГҐГ¤Г¶ <a&b> it's +" }""");
 
         var result = await Save(dir, "orders", "repository");
 
         Assert.True(result.Saved, result.Error);
         var text = File.ReadAllText(FileIn(dir));
-        Assert.Contains("\"едц <a&b> it's +\"", text);
+        Assert.Contains("\"ГҐГ¤Г¶ <a&b> it's +\"", text);
         Assert.EndsWith(Environment.NewLine, text);
     }
 

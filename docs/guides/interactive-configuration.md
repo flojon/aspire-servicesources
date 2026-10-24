@@ -12,7 +12,8 @@ var orders = builder.AddService("orders");
 ```
 
 The call is opt-in: without it nothing changes. A service that is not in the catalog at all still
-throws, since that is a mistake in the AppHost rather than something to answer in a dialog.
+throws, since that is a mistake in the AppHost rather than something to answer in a dialog. So does
+a service whose configured source is invalid: only a missing source becomes a placeholder.
 
 ## What you are asked
 
@@ -27,10 +28,17 @@ service is offered only the sources its catalog entry can actually use:
 | `url`, `path`, `disabled` | always |
 
 Leave a service blank to decide later. A source that needs more than its name asks a follow-up in a
-second dialog: `kubernetes` needs a context (and a port and an optional namespace and scheme, unless
-the catalog already gives them), `path` needs a directory and `url` needs the URL, each unless the
-catalog already supplies it. Answers are validated like the same values written by hand; an answer
-that would not resolve is reported and nothing is saved for that service.
+second dialog:
+
+- `kubernetes` always asks for a context, and for an optional namespace and endpoint scheme. It
+  asks for the service port only when the catalog does not give one.
+- `path` asks for a directory, and `url` for the URL, unless the catalog already supplies it.
+
+Answers are checked the way the next run would check them: the same validation as values written by
+hand, plus what resolving the source needs (a `url` must be an absolute `http` or `https` URL, a
+Kubernetes port must be between 1 and 65535 and its scheme `http` or `https`, and a `path` directory
+must exist, relative to the AppHost directory). An answer that would not resolve is reported with the
+same message the next run would give, and nothing is saved for that service.
 
 Closing the dialog without saving changes nothing; the services stay unconfigured and the AppHost
 keeps running. Each unconfigured service also has a **Configure** command in the dashboard that
