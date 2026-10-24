@@ -1,7 +1,7 @@
 # Aspire.Hosting.ServiceSources — Interactive Source Picker for Unconfigured Services
 
 **Date:** 2026-08-28
-**Status:** Design — not yet implemented. Reconciled with main on 2026-10-18 (see *Since this was
+**Status:** Implemented. Reconciled with main on 2026-10-18 (see *Since this was
 written*).
 **Complements:** GitHub issue #70 (per-service "Change source" command), which covers services
 that already resolved. This design covers the case #70 does not reach — a service with no source

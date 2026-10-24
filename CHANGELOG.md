@@ -23,6 +23,22 @@ never existed. Check the tag of the last release before adding one.
   version with a target-framework incompatibility. Move the AppHost to .NET 10, or stay on 0.8.x,
   which keeps all three targets.
 
+### Added
+
+- **`builder.UseInteractiveServiceConfiguration()` lets the dashboard choose a source for a service
+  nobody configured, instead of the AppHost throwing** ([#128]). The service resolves to a registered
+  placeholder that starts nothing, has no endpoints and shows `Not configured`. Once the dashboard is
+  up, a dialog offers each such service the sources its catalog entry can use and asks a follow-up
+  for any that need more (a Kubernetes context, a directory, a URL). A **Configure** command on the
+  placeholder raises the same dialog later. The answer is merged into `servicesources.local.json`
+  and takes effect the next time the AppHost starts; a file containing comments is refused rather
+  than rewritten, and closing the dialog changes nothing. It is opt-in, ignored when `CI`, `TF_BUILD`
+  or `JENKINS_URL` is set, in publish mode, and when `SERVICESOURCES_INTERACTIVE` is `false` (the
+  setting the source-pick prompt already honours; `true` forces it on after the opt-in), in which
+  case an unconfigured service throws as before. `GetServiceEndpoint()` and the type-returning
+  `Unwrap<T>()` throw on a placeholder. See [Choosing a source in the
+  dashboard](docs/guides/interactive-configuration.md).
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking
@@ -60,16 +76,6 @@ never existed. Check the tag of the last release before adding one.
   generated-code sample now needs Aspire CLI 13.6.1 or later.
 
 ### Added
-
-- **`builder.UseInteractiveServiceConfiguration()` lets a service nobody chose a source for resolve
-  to a placeholder instead of throwing** ([#128]). The placeholder is a registered resource that
-  starts nothing, has no endpoints and shows `Not configured` in the dashboard, so the AppHost
-  reaches the dashboard on a fresh clone. It is opt-in, ignored when `CI`, `TF_BUILD` or `JENKINS_URL` is set, in publish mode,
-  and when `SERVICESOURCES_INTERACTIVE` is `false` (the setting the source-pick prompt already
-  honours; `true` forces it on after the opt-in). Without the call nothing changes. This is only the
-  first part: there is no dialog to answer yet, so a developer still sets the source in
-  `servicesources.local.json`. `GetServiceEndpoint()` and the type-returning `Unwrap<T>()` still
-  throw on a placeholder.
 
 - **An AppHost run from a linked git worktree starts from the main worktree's state.** Its first run
   copies `servicesources.local.json` and the saved source picks from the main worktree's AppHost, and
