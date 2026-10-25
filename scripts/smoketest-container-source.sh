@@ -21,6 +21,11 @@ ECHO_TEXT_MARKER="Hostname:"
 # reserved TLD (RFC 2606) that can never resolve, which says outright that it isn't meant to.
 UNUSED_URL="http://unused.invalid"
 
+# The one "url" service something does reach: a container referencing it must receive this URL as a
+# literal and be able to fetch it from inside. A public, stable host; the container needs `wget`.
+REACHABLE_URL="https://httpbin.org"
+URL_CONSUMER_IMAGE="alpine:3.20"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 apphost_dir="$repo_root/samples/DemoAppHost"
 cache_dir="$repo_root/.smoketest-cache"
@@ -59,6 +64,7 @@ cleanup() {
   # Aspire/DCP doesn't reliably stop containers it started when the apphost is
   # killed rather than shut down cleanly, so sweep any leftover echo containers.
   docker ps -q --filter "ancestor=${ECHO_IMAGE}:${ECHO_TAG}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  docker ps -aq --filter "name=urlconsumer" | xargs -r docker rm -f >/dev/null 2>&1 || true
 
   cp "$yaml_backup" "$apphost_dir/servicesources.yaml"
   if [[ $had_local_json -eq 1 ]]; then
@@ -82,8 +88,9 @@ log "pointing DemoAppHost's container source at ${ECHO_IMAGE}:${ECHO_TAG}"
 # that surfaces as the AppHost dying at startup rather than as a config error.
 #
 # Only `orders` is the subject of this test, so only it gets the echo image. `inventory` and
-# `payments` resolve to the "url" source, which registers no resource and starts nothing,
-# keeping the run down to the single container being verified — and keeping the sample's real
+# `payments` resolve to the "url" source, which registers no resource and starts nothing (the
+# consumer container below is the one extra thing run, to check what a container is handed),
+# keeping the run down to the container being verified — and keeping the sample's real
 # entries (a repository clone and a second container image) out of it.
 cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
@@ -96,7 +103,7 @@ services:
       defaultTag: ${ECHO_TAG}
   inventory:
     url:
-      url: ${UNUSED_URL}
+      url: ${REACHABLE_URL}
   payments:
     url:
       url: ${UNUSED_URL}
@@ -140,7 +147,8 @@ log "building DemoAppHost"
 dotnet build "$apphost_dir/DemoAppHost.csproj" -v quiet
 
 log "running DemoAppHost"
-dotnet run --project "$apphost_dir/DemoAppHost.csproj" --no-build \
+SERVICESOURCES_DEMO_URL_CONSUMER="$URL_CONSUMER_IMAGE" \
+  dotnet run --project "$apphost_dir/DemoAppHost.csproj" --no-build \
   > "$cache_dir/apphost.log" 2>&1 &
 apphost_pid=$!
 
@@ -173,3 +181,25 @@ response="$(curl -fsS --retry 10 --retry-delay 1 --retry-connrefused "http://127
 [[ "$response" == *"$ECHO_TEXT_MARKER"* ]] || fail_with_apphost_log "unexpected response: '$response'"
 
 log "PASS: ContainerSource served traffic from the Aspire-managed container correctly"
+
+log "waiting for the container that references the 'url' service"
+consumer_id=""
+for _ in $(seq 1 90); do
+  consumer_id="$(docker ps -q --filter "name=urlconsumer" | head -n1 || true)"
+  [[ -n "$consumer_id" ]] && break
+  sleep 1
+done
+[[ -n "$consumer_id" ]] || fail_with_apphost_log "the container referencing a 'url' service never started"
+
+log "checking the URL arrived as a literal"
+consumer_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$consumer_id")"
+[[ "$consumer_env" == *"services__inventory__https__0=${REACHABLE_URL}"* ]] \
+  || fail_with_apphost_log "services__inventory__https__0 was not ${REACHABLE_URL}: $consumer_env"
+[[ "$consumer_env" == *"INVENTORY_HTTPS=${REACHABLE_URL}"* ]] \
+  || fail_with_apphost_log "INVENTORY_HTTPS was not ${REACHABLE_URL}: $consumer_env"
+
+log "fetching the URL from inside the container"
+docker exec "$consumer_id" wget -q -O - "${REACHABLE_URL}/get" | grep -q '"url"' \
+  || fail_with_apphost_log "the container could not fetch ${REACHABLE_URL} from inside"
+
+log "PASS: a container referencing a 'url' service was handed the URL and could reach it"

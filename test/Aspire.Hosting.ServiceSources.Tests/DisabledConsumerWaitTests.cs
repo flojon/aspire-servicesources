@@ -90,8 +90,8 @@ public class DisabledConsumerWaitTests
     }
 
     /// <summary>
-    /// A container that <c>WithReference</c>s a disabled service is not refused the way one
-    /// referencing a "url" service is (#58/#72): a disabled service registers no endpoint at all, so
+    /// A container that <c>WithReference</c>s a disabled service needs no rewrite the way one
+    /// referencing a "url" service does: a disabled service registers no endpoint at all, so
     /// there is nothing for DCP's container-to-host wiring to trip over — see
     /// <see cref="Sources.DisabledSource"/>'s remarks.
     /// </summary>
