@@ -1,0 +1,118 @@
+#nullable enable
+Aspire.Hosting.ServiceSources.BackingServiceBuilderExtensions
+Aspire.Hosting.ServiceSources.Catalog.RepositoryBuilder
+Aspire.Hosting.ServiceSources.Catalog.RepositoryBuilder.WithPrepare(string![]! command, string![]? windowsCommand = null, Aspire.Hosting.ServiceSources.Prepare.PrepareMode mode = Aspire.Hosting.ServiceSources.Prepare.PrepareMode.OncePerCommit) -> Aspire.Hosting.ServiceSources.Catalog.RepositoryBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceCatalogBuilder
+Aspire.Hosting.ServiceSources.Catalog.ServiceCatalogBuilder.AddRepository(string! name, string! url, string? defaultRef = null) -> Aspire.Hosting.ServiceSources.Catalog.RepositoryBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceCatalogBuilder.AddService(string! name) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.ExcludeLaunchProfile() -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithBuildGroup(string! name) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithContainer(string! image, int port, string? defaultTag = null, string? scheme = null) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithDefaultSource(string! source) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithKind(string! kind, object? options = null) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithKubernetes(string! service, int? port = null, string? scheme = null) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithLaunchProfile(string! launchProfileName) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithPath(string! path) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithPrepare(string![]! command, string![]? windowsCommand = null, Aspire.Hosting.ServiceSources.Prepare.PrepareMode mode = Aspire.Hosting.ServiceSources.Prepare.PrepareMode.OncePerCommit) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithProject(string! project) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithRepository(string! url, string? defaultRef = null) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithSharedRepository(Aspire.Hosting.ServiceSources.Catalog.RepositoryBuilder! repository) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithUrl(string! url) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+Aspire.Hosting.ServiceSources.CheckoutTiming
+Aspire.Hosting.ServiceSources.CheckoutTiming.Deferred = 0 -> Aspire.Hosting.ServiceSources.CheckoutTiming
+Aspire.Hosting.ServiceSources.CheckoutTiming.Eager = 1 -> Aspire.Hosting.ServiceSources.CheckoutTiming
+Aspire.Hosting.ServiceSources.DeferredLocalResource
+Aspire.Hosting.ServiceSources.DeferredLocalResource.DeferredLocalResource() -> void
+Aspire.Hosting.ServiceSources.DeferredLocalResource.Service.get -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.IResourceWithServiceDiscovery!>!
+Aspire.Hosting.ServiceSources.DeferredLocalResource.Service.init -> void
+Aspire.Hosting.ServiceSources.DeferredLocalResource.ValidateCheckout.get -> System.Action?
+Aspire.Hosting.ServiceSources.DeferredLocalResource.ValidateCheckout.init -> void
+Aspire.Hosting.ServiceSources.ILocalResourceKind
+Aspire.Hosting.ServiceSources.ILocalResourceKind.Resolve(Aspire.Hosting.IDistributedApplicationBuilder! builder, string! serviceName, string! repoRoot, object? rawConfig) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.IResourceWithServiceDiscovery!>!
+Aspire.Hosting.ServiceSources.ILocalResourceKind.ResolveDeferred(Aspire.Hosting.IDistributedApplicationBuilder! builder, string! serviceName, string! repoRoot, object? rawConfig) -> Aspire.Hosting.ServiceSources.DeferredLocalResource?
+Aspire.Hosting.ServiceSources.ILocalResourceKind.ResourceType.get -> System.Type!
+Aspire.Hosting.ServiceSources.ILocalResourceKind.SupportsDeferredCheckout(object? rawConfig) -> bool
+Aspire.Hosting.ServiceSources.ILocalResourceKind.Validate(string! serviceName, string! repoRoot, object? rawConfig) -> void
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithArgs(string![]! args) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithGradleTask(string! task) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithJarPath(string! jarPath) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithMavenGoal(string! goal) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithPort(int port) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithScheme(string! scheme) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithWorkingDirectory(string! workingDirectory) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder.WithWrapperPath(string! wrapperPath) -> Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptAppTypes
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithAppDirectory(string! appDirectory) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithAppType(string! appType) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithPackageManager(string! packageManager) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithPort(int port) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithPortEnv(string! portEnv) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithRunScript(string! runScript) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithScriptPath(string! scriptPath) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder.WithTargetPort(int targetPort) -> Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!
+Aspire.Hosting.ServiceSources.JavaScriptPackageManagers
+Aspire.Hosting.ServiceSources.JavaScriptServiceSourcesBuilderExtensions
+Aspire.Hosting.ServiceSources.JavaServiceSourcesBuilderExtensions
+Aspire.Hosting.ServiceSources.LocalKindConfig
+Aspire.Hosting.ServiceSources.LocalKinds
+Aspire.Hosting.ServiceSources.Prepare.PrepareMode
+Aspire.Hosting.ServiceSources.Prepare.PrepareMode.Always = 2 -> Aspire.Hosting.ServiceSources.Prepare.PrepareMode
+Aspire.Hosting.ServiceSources.Prepare.PrepareMode.Never = 3 -> Aspire.Hosting.ServiceSources.Prepare.PrepareMode
+Aspire.Hosting.ServiceSources.Prepare.PrepareMode.Once = 1 -> Aspire.Hosting.ServiceSources.Prepare.PrepareMode
+Aspire.Hosting.ServiceSources.Prepare.PrepareMode.OncePerCommit = 0 -> Aspire.Hosting.ServiceSources.Prepare.PrepareMode
+Aspire.Hosting.ServiceSources.ServiceConfigurationExtensions
+Aspire.Hosting.ServiceSources.ServiceEndpointExtensions
+Aspire.Hosting.ServiceSources.ServiceResource
+Aspire.Hosting.ServiceSources.ServiceResource.ServiceResource(string! name) -> void
+Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions
+Aspire.Hosting.ServiceSources.ServiceSourcesConfigurationException
+Aspire.Hosting.ServiceSources.ServiceSourcesConfigurationException.ServiceSourcesConfigurationException(string! message) -> void
+Aspire.Hosting.ServiceSources.ServiceSourcesConfigurationException.ServiceSourcesConfigurationException(string! message, System.Exception! innerException) -> void
+Aspire.Hosting.ServiceSources.Sources.EndpointScheme
+const Aspire.Hosting.ServiceSources.JavaScriptAppTypes.Bun = "bun" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptAppTypes.JavaScript = "javascript" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptAppTypes.NextJs = "nextjs" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptAppTypes.Node = "node" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptAppTypes.Vite = "vite" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptPackageManagers.Bun = "bun" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptPackageManagers.Npm = "npm" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptPackageManagers.Pnpm = "pnpm" -> string!
+const Aspire.Hosting.ServiceSources.JavaScriptPackageManagers.Yarn = "yarn" -> string!
+const Aspire.Hosting.ServiceSources.LocalKinds.Dotnet = "dotnet" -> string!
+const Aspire.Hosting.ServiceSources.Sources.EndpointScheme.Http = "http" -> string!
+const Aspire.Hosting.ServiceSources.Sources.EndpointScheme.Https = "https" -> string!
+override Aspire.Hosting.ServiceSources.ServiceSourcesConfigurationException.ToString() -> string!
+static Aspire.Hosting.ServiceSources.BackingServiceBuilderExtensions.AddBackingService(this Aspire.Hosting.IDistributedApplicationBuilder! builder, string! name, System.Func<Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ApplicationModel.IResourceWithConnectionString!>!>! local) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ApplicationModel.IResourceWithConnectionString!>!
+static Aspire.Hosting.ServiceSources.JavaScriptAppTypes.BindsItsOwnPort(string! appType) -> bool
+static Aspire.Hosting.ServiceSources.JavaScriptAppTypes.RunsAScriptFile(string! appType) -> bool
+static Aspire.Hosting.ServiceSources.JavaScriptServiceSourcesBuilderExtensions.AsJavaScript(this Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder! builder, System.Action<Aspire.Hosting.ServiceSources.JavaScriptKindOptionsBuilder!>! configure) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+static Aspire.Hosting.ServiceSources.JavaScriptServiceSourcesBuilderExtensions.UseJavaScript(this Aspire.Hosting.IDistributedApplicationBuilder! builder) -> Aspire.Hosting.IDistributedApplicationBuilder!
+static Aspire.Hosting.ServiceSources.JavaServiceSourcesBuilderExtensions.AsJava(this Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder! builder, System.Action<Aspire.Hosting.ServiceSources.Java.JavaKindOptionsBuilder!>! configure) -> Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder!
+static Aspire.Hosting.ServiceSources.JavaServiceSourcesBuilderExtensions.UseJava(this Aspire.Hosting.IDistributedApplicationBuilder! builder) -> Aspire.Hosting.IDistributedApplicationBuilder!
+static Aspire.Hosting.ServiceSources.LocalKindConfig.Parse<T>(object? rawConfig, string? serviceName = null) -> T?
+static Aspire.Hosting.ServiceSources.ServiceConfigurationExtensions.Unwrap<T>(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.IResourceWithServiceDiscovery!>! service) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<T>!
+static Aspire.Hosting.ServiceSources.ServiceConfigurationExtensions.Unwrap<T>(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.IResourceWithServiceDiscovery!>! service, System.Action<Aspire.Hosting.ApplicationModel.IResourceBuilder<T>!>! configure) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.IResourceWithServiceDiscovery!>!
+static Aspire.Hosting.ServiceSources.ServiceConfigurationExtensions.Unwrap<T>(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! service, System.Action<Aspire.Hosting.ApplicationModel.IResourceBuilder<T>!>! configure) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceEndpointExtensions.GetServiceEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.IResourceWithServiceDiscovery!>! service) -> Aspire.Hosting.ApplicationModel.EndpointReference!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.AddLocalKind(this Aspire.Hosting.IDistributedApplicationBuilder! builder, string! kind, Aspire.Hosting.ServiceSources.ILocalResourceKind! handler) -> Aspire.Hosting.IDistributedApplicationBuilder!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.AddService(this Aspire.Hosting.IDistributedApplicationBuilder! builder, string! name) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.AddServiceCatalog(this Aspire.Hosting.IDistributedApplicationBuilder! builder, System.Action<Aspire.Hosting.ServiceSources.Catalog.ServiceCatalogBuilder!>! configure) -> Aspire.Hosting.IDistributedApplicationBuilder!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.SetCheckoutTiming(this Aspire.Hosting.IDistributedApplicationBuilder! builder, Aspire.Hosting.ServiceSources.CheckoutTiming timing) -> Aspire.Hosting.IDistributedApplicationBuilder!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.UseDeferredCheckout(this Aspire.Hosting.IDistributedApplicationBuilder! builder) -> Aspire.Hosting.IDistributedApplicationBuilder!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithCommand(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, string! name, string! displayName, System.Func<Aspire.Hosting.ApplicationModel.ExecuteCommandContext!, System.Threading.Tasks.Task<Aspire.Hosting.ApplicationModel.ExecuteCommandResult!>!>! executeCommand, Aspire.Hosting.ApplicationModel.CommandOptions? commandOptions = null) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithCommand(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, string! name, string! displayName, System.Func<Aspire.Hosting.ApplicationModel.ExecuteCommandContext!, System.Threading.Tasks.Task<Aspire.Hosting.ApplicationModel.ExecuteCommandResult!>!>! executeCommand, System.Func<Aspire.Hosting.ApplicationModel.UpdateCommandStateContext!, Aspire.Hosting.ApplicationModel.ResourceCommandState>? updateState = null, string? displayDescription = null, object? parameter = null, string? confirmationMessage = null, string? iconName = null, Aspire.Hosting.ApplicationModel.IconVariant? iconVariant = null, bool isHighlighted = false) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port = null, int? targetPort = null, string? scheme = null, string? name = null, string? env = null, bool? isProxied = null, bool? isExternal = null, System.Net.Sockets.ProtocolType? protocol = null) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port, int? targetPort, string? scheme, string? name, string? env, bool isProxied, bool? isExternal) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port, int? targetPort, string? scheme, string? name, string? env, bool isProxied, bool? isExternal, System.Net.Sockets.ProtocolType? protocol) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port, int? targetPort, string? scheme, string? name, string? env, bool? isProxied, bool? isExternal) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, string! endpointName, System.Action<Aspire.Hosting.ApplicationModel.EndpointAnnotation!>! callback, bool createIfNotExists = true) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithExternalHttpEndpoints(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithHttpEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port = null, int? targetPort = null, string? name = null, string? env = null, bool? isProxied = null) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithHttpEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port, int? targetPort, string? name, string? env, bool isProxied) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithHttpsEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port = null, int? targetPort = null, string? name = null, string? env = null, bool? isProxied = null) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.WithHttpsEndpoint(this Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>! builder, int? port, int? targetPort, string? name, string? env, bool isProxied) -> Aspire.Hosting.ApplicationModel.IResourceBuilder<Aspire.Hosting.ServiceSources.ServiceResource!>!
+static readonly Aspire.Hosting.ServiceSources.JavaScriptAppTypes.All -> string![]!
+static readonly Aspire.Hosting.ServiceSources.JavaScriptPackageManagers.All -> string![]!
