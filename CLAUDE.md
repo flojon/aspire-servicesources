@@ -23,3 +23,15 @@ dotnet test --filter "IO!=true&Timing!=true"        # fast, hermetic subset
 ```
 
 When a test flakes, check its class's traits first. A flake in a class without `Timing` or `Concurrency` usually means a missing label or shared state between tests.
+
+# Public API baseline
+
+`src/Aspire.Hosting.ServiceSources` tracks its public surface in `PublicAPI.Shipped.txt` (released) and
+`PublicAPI.Unshipped.txt` (added since the last release), enforced by `Microsoft.CodeAnalysis.PublicApiAnalyzers`.
+Adding, changing or removing a public member fails the build with `RS0016`/`RS0017` until the diff is
+recorded, so an API change always shows up in review as a change to these files.
+
+- New or changed API: add the line the analyzer reports to `PublicAPI.Unshipped.txt`. In an IDE use the
+  "Add to public API" quick fix; from the CLI copy the symbol out of the `RS0016` message.
+- Removed or changed API: a removal of a shipped member is a `*REMOVED*`-prefixed line in `Unshipped`.
+- At release, move the `Unshipped` lines into `Shipped` and leave `Unshipped` with only `#nullable enable`.

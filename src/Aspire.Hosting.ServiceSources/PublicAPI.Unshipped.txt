@@ -1,0 +1,2 @@
+#nullable enable
+static Aspire.Hosting.ServiceSources.ServiceSourcesBuilderExtensions.UseInteractiveServiceConfiguration(this Aspire.Hosting.IDistributedApplicationBuilder! builder) -> Aspire.Hosting.IDistributedApplicationBuilder!
