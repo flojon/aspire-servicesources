@@ -17,8 +17,10 @@ public class JsonFileDeveloperConfigWriterTests
     private static JsonObject ReadRoot(string dir) => JsonNode.Parse(File.ReadAllText(FileIn(dir)))!.AsObject();
 
     private static Task<SaveResult> Save(
-        string dir, string service, string source, IReadOnlyDictionary<string, string>? fields = null) =>
-        new JsonFileDeveloperConfigWriter(dir).SaveAsync(service, source, fields ?? NoFields, CancellationToken.None);
+        string dir, string service, string source, IReadOnlyDictionary<string, string>? fields = null,
+        Func<JsonObject, string?>? validateMerged = null) =>
+        new JsonFileDeveloperConfigWriter(dir).SaveAsync(
+            service, source, fields ?? NoFields, CancellationToken.None, validateMerged);
 
     [Fact]
     public async Task Save_NoFile_CreatesItWithServicesEntry()
@@ -257,5 +259,58 @@ public class JsonFileDeveloperConfigWriterTests
 
         Assert.False(result.Saved);
         Assert.Equal(content, File.ReadAllText(FileIn(dir)));
+    }
+
+    [Theory]
+    [InlineData("""{ "services": { "orders": { "source": "path" }, "orders": { "source": "url" } } }""")]
+    [InlineData("""{ "services": { "orders": { "source": "path" }, "Orders": { "source": "url" } } }""")]
+    [InlineData("""{ "repositoryRoot": "a", "repositoryRoot": "b" }""")]
+    public async Task Save_DuplicateKeys_ReturnsErrorAndLeavesFileByteIdentical(string content)
+    {
+        var dir = NewDirectory();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(FileIn(dir), bytes);
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.False(result.Saved);
+        Assert.Contains("twice", result.Error);
+        Assert.Equal(bytes, File.ReadAllBytes(FileIn(dir)));
+    }
+
+    [Theory]
+    [InlineData("""{ "services": null }""")]
+    [InlineData("""{ "services": { "orders": null } }""")]
+    public async Task Save_NullWhereObjectGoes_IsTreatedAsMissing(string content)
+    {
+        var dir = NewDirectory();
+        File.WriteAllText(FileIn(dir), content);
+
+        var result = await Save(dir, "orders", "repository");
+
+        Assert.True(result.Saved, result.Error);
+        Assert.Equal("repository", (string?)ReadRoot(dir)["services"]!["orders"]!["source"]);
+        Assert.Equal("repository", DeveloperConfiguration.ReadFrom(TestHelpers.CreateBuilder(dir), ["orders"], []).Services["orders"].Source);
+    }
+
+    [Fact]
+    public async Task Save_MergedEntryRejected_ReturnsErrorAndLeavesFileByteIdentical()
+    {
+        var dir = NewDirectory();
+        var bytes = """{ "services": { "orders": { "kubernetes": { "scheme": "ftp" } } } }"""u8.ToArray();
+        File.WriteAllBytes(FileIn(dir), bytes);
+        JsonObject? seen = null;
+
+        var result = await Save(dir, "orders", "kubernetes", validateMerged: entry =>
+        {
+            seen = (JsonObject)entry.DeepClone();
+            return "scheme 'ftp' is not supported";
+        });
+
+        Assert.False(result.Saved);
+        Assert.Contains("scheme 'ftp' is not supported", result.Error);
+        Assert.Equal("ftp", (string?)seen!["kubernetes"]!["scheme"]);
+        Assert.Equal("kubernetes", (string?)seen["source"]);
+        Assert.Equal(bytes, File.ReadAllBytes(FileIn(dir)));
     }
 }

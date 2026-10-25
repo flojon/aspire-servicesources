@@ -1,6 +1,11 @@
+using System.Text;
+using System.Text.Json.Nodes;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.CommandLine;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.Configuration.Memory;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -57,6 +62,30 @@ internal static class PickerAnswers
         using var root = new ConfigurationRoot([new MemoryConfigurationProvider(
             new MemoryConfigurationSource { InitialData = data })]);
 
+        return CheckSection(service, source, root, definition, appHostDirectory);
+    }
+
+    /// <summary>
+    /// The same checks over a service's whole entry as it would be written, so fields already in the file count.
+    /// </summary>
+    /// <returns>The reason the entry would fail the next run, or <see langword="null"/> when it is fine.</returns>
+    public static string? ValidateEntry(
+        string service, string source, JsonObject entry, ServiceDefinition definition, string appHostDirectory)
+    {
+        var offered = SourceChoices.For(definition)
+            .FirstOrDefault(choice => string.Equals(choice, source, StringComparison.OrdinalIgnoreCase)) ?? source;
+
+        var wrapper = new JsonObject { [service] = entry.DeepClone() };
+
+        using var root = new ConfigurationRoot([new JsonStreamConfigurationProvider(
+            new JsonStreamConfigurationSource { Stream = new MemoryStream(Encoding.UTF8.GetBytes(wrapper.ToJsonString())) })]);
+
+        return CheckSection(service, offered, root, definition, appHostDirectory);
+    }
+
+    private static string? CheckSection(
+        string service, string source, IConfigurationRoot root, ServiceDefinition definition, string appHostDirectory)
+    {
         try
         {
             var section = root.GetSection(service);
@@ -95,8 +124,21 @@ internal static class PickerAnswers
         }
     }
 
+    private static string? FilePath(FileConfigurationProvider file) =>
+        file.Source.FileProvider?.GetFileInfo(file.Source.Path ?? string.Empty).PhysicalPath ?? file.Source.Path;
+
+    // Names the file or kind of layer, which tells the developer where to look; it carries no values.
+    private static string Describe(IConfigurationProvider provider) => provider switch
+    {
+        FileConfigurationProvider file => $"the file {FilePath(file)}",
+        EnvironmentVariablesConfigurationProvider => "an environment variable",
+        CommandLineConfigurationProvider => "a command-line argument",
+        _ => $"a configuration source ({provider})",
+    };
+
     /// <summary>
-    /// The first layer above the developer-config file that blanks the service's <c>source</c>, if any.
+    /// A description of the first layer above the developer-config file that blanks the service's
+    /// <c>source</c>, if any.
     /// </summary>
     /// <remarks>
     /// The file's layer is found by identity, not position: the catalog's <c>defaultSource</c> layer is
@@ -112,8 +154,7 @@ internal static class PickerAnswers
         {
             if (provider.TryGet(key, out var value) && string.IsNullOrWhiteSpace(value))
             {
-                // A file provider's ToString names its file, which tells the developer where to look; it carries no values.
-                return provider.ToString();
+                return Describe(provider);
             }
         }
 

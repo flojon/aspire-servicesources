@@ -53,8 +53,8 @@ internal static class UnconfiguredSource
         return ResolvedService.Bridge(real, serviceName, SourceName);
     }
 
-    // Kept free of file paths and of anything that assumes how the source gets chosen.
+    // Names the command and the key, never a file path.
     private static string Reason(string serviceName) =>
-        Raw.Compose($"No source has been chosen for this service. Set " +
+        Raw.Compose($"No source has been chosen for this service. Use Configure on this row, or set " +
             $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{Raw.Escaped(serviceName)}:source'.").ToString();
 }

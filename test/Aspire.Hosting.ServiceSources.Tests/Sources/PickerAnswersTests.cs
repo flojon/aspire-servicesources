@@ -60,6 +60,13 @@ public class PickerAnswersTests
     }
 
     [Fact]
+    public void Validate_ServiceNameWithColon_StillChecksItsFields()
+    {
+        Assert.NotNull(PickerAnswers.Validate("a:b", "url", Fields(("url:url", "ftp://x")), Definition(), AppHost));
+        Assert.Null(PickerAnswers.Validate("a:b", "url", Fields(("url:url", "http://x")), Definition(), AppHost));
+    }
+
+    [Fact]
     public void Validate_SourceInOtherCase_StillRequiresItsFields()
     {
         var error = PickerAnswers.Validate("orders", "Kubernetes", NoFields, Definition(), AppHost);

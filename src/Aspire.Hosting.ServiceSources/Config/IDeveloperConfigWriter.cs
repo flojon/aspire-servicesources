@@ -15,8 +15,15 @@ internal interface IDeveloperConfigWriter
     /// <param name="serviceName">The service as the catalog spells it.</param>
     /// <param name="source">The chosen source.</param>
     /// <param name="fields">Follow-up answers; a <c>:</c> in a key nests the value one object deeper.</param>
+    /// <param name="validateMerged">
+    /// Checks the service's entry as it would be written, existing fields included; a message refuses the save.
+    /// </param>
     Task<SaveResult> SaveAsync(
-        string serviceName, string source, IReadOnlyDictionary<string, string> fields, CancellationToken cancellationToken);
+        string serviceName,
+        string source,
+        IReadOnlyDictionary<string, string> fields,
+        CancellationToken cancellationToken,
+        Func<JsonObject, string?>? validateMerged = null);
 }
 
 /// <summary>
@@ -52,7 +59,11 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
     }
 
     public async Task<SaveResult> SaveAsync(
-        string serviceName, string source, IReadOnlyDictionary<string, string> fields, CancellationToken cancellationToken)
+        string serviceName,
+        string source,
+        IReadOnlyDictionary<string, string> fields,
+        CancellationToken cancellationToken,
+        Func<JsonObject, string?>? validateMerged = null)
     {
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string? scratch = null;
@@ -89,6 +100,12 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
                 }
 
                 Set(target, parts[^1], value);
+            }
+
+            if (validateMerged?.Invoke(entry) is { } invalid)
+            {
+                return new SaveResult(
+                    false, $"{invalid} The entry for '{serviceName}' in {_path} would not load, so nothing was saved.");
             }
 
             var directory = Path.GetDirectoryName(_path)!;
@@ -173,6 +190,13 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
                 return null;
             }
 
+            // The configuration reader rejects these too; JsonNode would only fail later, on first access.
+            if (FindDuplicateKey(bytes) is { } duplicate)
+            {
+                error = $"{_path} is not valid JSON: the key '{duplicate}' appears twice in one object (keys are case-insensitive).";
+                return null;
+            }
+
             var node = JsonNode.Parse(bytes, nodeOptions: null, ParseOptions);
             if (node is JsonObject root)
             {
@@ -208,6 +232,40 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
         return false;
     }
 
+    private static string? FindDuplicateKey(byte[] json)
+    {
+        var reader = new Utf8JsonReader(json, new JsonReaderOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+
+        var objects = new Stack<HashSet<string>>();
+
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                    objects.Push(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                    break;
+                case JsonTokenType.EndObject:
+                    objects.Pop();
+                    break;
+                case JsonTokenType.PropertyName:
+                    var name = reader.GetString()!;
+                    if (!objects.Peek().Add(name))
+                    {
+                        return name;
+                    }
+
+                    break;
+            }
+        }
+
+        return null;
+    }
+
     // Matches an existing key whatever its case, so the developer's spelling is kept.
     private static string? FindKey(JsonObject parent, string name) =>
         parent.Select(property => property.Key)
@@ -218,12 +276,14 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
         var key = FindKey(parent, name);
         if (key is not null)
         {
-            if (parent[key] is JsonObject existing)
+            var node = parent[key];
+            if (node is JsonObject existing)
             {
                 return existing;
             }
 
-            if (!replaceScalar)
+            // A null loads as an absent key, so it is replaced rather than refused.
+            if (node is not null && !replaceScalar)
             {
                 return null;
             }

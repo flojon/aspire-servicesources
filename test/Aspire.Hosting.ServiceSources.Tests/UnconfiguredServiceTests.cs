@@ -150,6 +150,7 @@ public class UnconfiguredServiceTests
         var reason = Assert.Single(snapshot.Properties, p => p.Name == "Reason").Value?.ToString();
 
         Assert.Contains("ServiceSources:Services:inventory:source", reason);
+        Assert.Contains("Configure", reason);
         Assert.DoesNotContain("servicesources.local.json", reason);
         Assert.DoesNotContain(Path.DirectorySeparatorChar, reason!);
     }

@@ -296,7 +296,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <summary>
     /// Lets a service no configuration layer gave a source resolve to a placeholder instead of
     /// throwing, so the AppHost reaches the dashboard. The placeholder starts nothing, has no
-    /// endpoints and shows <c>Not configured</c>.
+    /// endpoints and shows <c>Not configured</c>. Once the AppHost is starting, a dashboard dialog asks
+    /// for a source for each placeholder, and each placeholder has a <c>Configure</c> command that asks
+    /// again for that one service. A valid choice is saved to <c>servicesources.local.json</c> and takes
+    /// effect the next time the AppHost starts; this run stays unconfigured.
     /// </summary>
     /// <remarks>
     /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>,

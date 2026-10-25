@@ -44,9 +44,9 @@ internal static class UnconfiguredPrompt
         }
 
         var message =
-            $"These services have no source, so they are not running. Choose one for each; the choice is saved in "
-            + $"{DeveloperConfiguration.FileName} and takes effect the next time the AppHost starts. Leave a service "
-            + $"blank to decide later.";
+            $"These services have no source, so they are not running. Pick a source for each one you want to set up "
+            + $"now; the choice is saved in {DeveloperConfiguration.FileName} and takes effect the next time the AppHost "
+            + $"starts. Leave a service blank to decide later.";
 
         return new SourcePromptContent(
             Title,
@@ -67,11 +67,6 @@ internal static class UnconfiguredPrompt
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        if (unconfigured.Count == 0)
-        {
-            return;
-        }
-
         var interaction = services.GetService<IInteractionService>();
         if (interaction is null || !interaction.IsAvailable)
         {
@@ -124,7 +119,7 @@ internal static class UnconfiguredPrompt
 
             answered++;
 
-            var outcome = await SaveOneAsync(
+            var outcome = await SaveGuardedAsync(
                 interaction, services, unconfigured[i], input.Value.Trim(), writer, appHostDirectory, logger, token)
                 .ConfigureAwait(false);
 
@@ -143,12 +138,15 @@ internal static class UnconfiguredPrompt
             }
         }
 
-        if (answered == 0)
+        if (saved.Count == 0 && failed.Count == 0)
         {
+            var why = answered == 0
+                ? Raw.Literal("No source was chosen in the source dialog")
+                : Raw.Literal("Every details dialog was closed");
+
             ServiceSourcesLog.Information(
                 logger,
-                $"No source was chosen in the source dialog, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. "
-                + $"{HowToConfigure}");
+                $"{why}, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. {HowToConfigure}");
             return;
         }
 
@@ -156,6 +154,28 @@ internal static class UnconfiguredPrompt
     }
 
     private sealed record Outcome(bool Saved, Raw Line);
+
+    // One service's failure must not skip the rest or lose the notification for those already saved.
+    private static async Task<Outcome?> SaveGuardedAsync(
+        IInteractionService interaction,
+        IServiceProvider services,
+        Unconfigured service,
+        string answer,
+        IDeveloperConfigWriter writer,
+        string appHostDirectory,
+        ILogger logger,
+        CancellationToken token)
+    {
+        try
+        {
+            return await SaveOneAsync(interaction, services, service, answer, writer, appHostDirectory, logger, token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
+        {
+            return Failed(logger, new Name(service.ServiceName), Raw.Cause(ex));
+        }
+    }
 
     /// <returns><see langword="null"/> when the developer closed this service's follow-up.</returns>
     private static async Task<Outcome?> SaveOneAsync(
@@ -203,7 +223,14 @@ internal static class UnconfiguredPrompt
             ? PickerAnswers.ShadowingProvider(root, service.ServiceName)
             : null;
 
-        var result = await writer.SaveAsync(service.ServiceName, source, fields, token).ConfigureAwait(false);
+        var result = await writer
+            .SaveAsync(
+                service.ServiceName,
+                source,
+                fields,
+                token,
+                entry => PickerAnswers.ValidateEntry(service.ServiceName, source, entry, service.Definition, appHostDirectory))
+            .ConfigureAwait(false);
         if (!result.Saved)
         {
             return Failed(logger, name, Raw.Output(result.Error));
@@ -211,8 +238,8 @@ internal static class UnconfiguredPrompt
 
         var line = shadowedBy is null
             ? Raw.Compose($"'{name}' ({Raw.Escaped(source)})")
-            : Raw.Compose($"'{name}' ({Raw.Escaped(source)}), which will not take effect until {Raw.Output(shadowedBy)} "
-                + $"stops setting '{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{Raw.Escaped(service.ServiceName)}:source' to blank");
+            : Raw.Compose($"'{name}' ({Raw.Escaped(source)}), which will not take effect while {Raw.Display(shadowedBy)} "
+                + $"sets '{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{Raw.Escaped(service.ServiceName)}:source' to blank; remove that setting");
 
         ServiceSourcesLog.Information(logger, $"Saved source {line} to {Raw.Literal(DeveloperConfiguration.FileName)}.");
 

@@ -63,17 +63,41 @@ public class UnconfiguredPromptTests
         };
 
     private static async Task<(string Dir, ListLogger Logger)> RunAsync(
-        FakeInteractionService interaction, IReadOnlyList<Unconfigured> services, IConfiguration? configuration = null)
+        FakeInteractionService interaction,
+        IReadOnlyList<Unconfigured> services,
+        IConfiguration? configuration = null,
+        string? existingJson = null,
+        Func<string, IDeveloperConfigWriter>? writerFor = null)
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         var logger = new ListLogger();
 
+        if (existingJson is not null)
+        {
+            File.WriteAllText(LocalJson(dir), existingJson);
+        }
+
         await UnconfiguredPrompt.RunAsync(
-                Services(interaction, configuration), services, new JsonFileDeveloperConfigWriter(dir), dir, logger,
-                CancellationToken.None)
+                Services(interaction, configuration), services, writerFor?.Invoke(dir) ?? new JsonFileDeveloperConfigWriter(dir), dir,
+                logger, CancellationToken.None)
             .WaitAsync(Patience);
 
         return (dir, logger);
+    }
+
+    private sealed class FailingFirstWriter(string appHostDirectory) : IDeveloperConfigWriter
+    {
+        private readonly JsonFileDeveloperConfigWriter _inner = new(appHostDirectory);
+
+        public Task<SaveResult> SaveAsync(
+            string serviceName,
+            string source,
+            IReadOnlyDictionary<string, string> fields,
+            CancellationToken cancellationToken,
+            Func<JsonObject, string?>? validateMerged = null) =>
+            serviceName == "orders"
+                ? throw new ArgumentException("An item with the same key has already been added.")
+                : _inner.SaveAsync(serviceName, source, fields, cancellationToken, validateMerged);
     }
 
     private static string LocalJson(string dir) => Path.Combine(dir, DeveloperConfiguration.FileName);
@@ -185,6 +209,61 @@ public class UnconfiguredPromptTests
         Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("orders"));
     }
 
+    [Theory]
+    [InlineData("""{ "services": { "orders": { "kubernetes": { "scheme": "ftp" } } } }""", "scheme 'ftp' is not supported")]
+    [InlineData("""{ "services": { "orders": { "kubernetes": { "namespace": " x " } } } }""", "namespace")]
+    public async Task Run_ExistingFieldInFileWouldFailNextRun_NotSavedAndSaysWhy(string existing, string expected)
+    {
+        var interaction = Answering(["kubernetes"], (_, inputs) => Fill(inputs, "dev", "80"));
+
+        var (dir, _) = await RunAsync(interaction, [Orders()], existingJson: existing);
+
+        Assert.Equal(existing, File.ReadAllText(LocalJson(dir)));
+        var failure = Assert.Single(interaction.Notifications);
+        Assert.Equal(MessageIntent.Error, failure.Options?.Intent);
+        Assert.Contains(expected, failure.Message);
+    }
+
+    [Fact]
+    public async Task Run_ExistingEmptyUrlHidesCatalogUrl_NotSaved()
+    {
+        var existing = """{ "services": { "inventory": { "url": { "url": "" } } } }""";
+        var inventory = new Unconfigured(
+            "inventory",
+            new ServiceMetadata { Url = new UrlMetadata { Url = "https://inventory.example.com" } }
+                .ToDefinition("servicesources.yaml", "inventory", TestHelpers.EmptyRepositories));
+        var interaction = Answering(["url"]);
+
+        var (dir, _) = await RunAsync(interaction, [inventory], existingJson: existing);
+
+        Assert.Equal(existing, File.ReadAllText(LocalJson(dir)));
+        Assert.Equal(MessageIntent.Error, Assert.Single(interaction.Notifications).Options?.Intent);
+    }
+
+    [Fact]
+    public async Task Run_WriterThrowsForOneService_OthersStillSaved_NotificationsRaised()
+    {
+        var interaction = Answering(["container", "repository"]);
+
+        var (dir, _) = await RunAsync(interaction, [Orders(), Billing()], writerFor: d => new FailingFirstWriter(d));
+
+        Assert.Equal("repository", SavedEntry(dir, "billing")?["source"]?.GetValue<string>());
+        Assert.Contains("billing", Assert.Single(interaction.Notifications, n => n.Options?.Intent == MessageIntent.Success).Message);
+        Assert.Contains("orders", Assert.Single(interaction.Notifications, n => n.Options?.Intent == MessageIntent.Error).Message);
+    }
+
+    [Fact]
+    public async Task Run_EveryFollowUpClosed_LogsNothingSavedLine()
+    {
+        var interaction = Answering(["kubernetes"], (_, _) => InteractionResult.Cancel<InteractionInputCollection>());
+
+        var (dir, logger) = await RunAsync(interaction, [Orders()]);
+
+        Assert.False(File.Exists(LocalJson(dir)));
+        Assert.Empty(interaction.Notifications);
+        Assert.Contains(logger.Entries, e => e.Message.Contains("nothing was saved") && e.Message.Contains("Configure"));
+    }
+
     [Fact]
     public async Task Run_NotificationsNotDismissed_RunCompletes_BothRaisedInOrder()
     {
@@ -286,9 +365,11 @@ public class UnconfiguredPromptTests
     [Fact]
     public async Task Run_ShadowedByHigherLayer_StillSaves_NotificationNamesProvider()
     {
+        var shadowing = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "appsettings.Local.json");
+        File.WriteAllText(shadowing, """{ "ServiceSources": { "Services": { "orders": { "source": "" } } } }""");
         var configuration = new ConfigurationBuilder()
             .Add(new DeveloperConfigFileSource.FileLayerSource())
-            .AddJsonStream(new MemoryStream("""{ "ServiceSources": { "Services": { "orders": { "source": "" } } } }"""u8.ToArray()))
+            .AddJsonFile(shadowing)
             .Build();
         var interaction = Answering(["container"]);
 
@@ -297,8 +378,10 @@ public class UnconfiguredPromptTests
         Assert.Equal("container", SavedEntry(dir, "orders")?["source"]?.GetValue<string>());
 
         var notification = Assert.Single(interaction.Notifications);
-        Assert.Contains("JsonStreamConfigurationProvider", notification.Message);
+        Assert.Contains(shadowing, notification.Message);
+        Assert.DoesNotContain("JsonConfigurationProvider", notification.Message);
         Assert.Contains("will not take effect", notification.Message);
+        Assert.Contains("remove that setting", notification.Message);
     }
 
     private static string CatalogDirectory(string extraLocalJson = "")
