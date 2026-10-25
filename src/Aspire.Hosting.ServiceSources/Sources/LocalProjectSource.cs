@@ -311,13 +311,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// has, so nothing is ever cloned and the absent <c>repository</c> costs that configuration
     /// nothing.
     /// <para>
-    /// The message offers only remedies this guard itself can verify. Switching to <c>url</c>,
-    /// <c>container</c> or <c>kubernetes</c> works only if that source's own preconditions hold —
-    /// none of which is readable from here — so it is not offered; a declared block is not proof
-    /// those preconditions hold either. The remedies offered are declaring a repository and the
-    /// <c>"path"</c> source with a <c>path.path</c> override — the non-deprecated form of the
-    /// <c>repository.path</c> exemption above — and the configuration key is named in every layer
-    /// that can set it.
+    /// The message names the remedies it can stand behind. A switch to <c>url</c>, <c>container</c>
+    /// or <c>kubernetes</c> is offered only for a source whose own
+    /// <see cref="IServiceSource.CanResolve"/> says the entry would resolve under it as things
+    /// stand (see <see cref="SourceSwitchRemedy"/>); a declared block is not proof its preconditions
+    /// hold, so a source that cannot resolve is left out. The other remedies are declaring a
+    /// repository and the <c>"path"</c> source with a <c>path.path</c> override — the
+    /// non-deprecated form of the <c>repository.path</c> exemption above — and the configuration
+    /// key is named in every layer that can set it.
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
@@ -334,7 +335,41 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
             + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or {PathSourceRemedy(serviceKey, definition)} "
-            + $"{WhereTheSourceCanBeSet(serviceName)}");
+            + $"{SourceSwitchRemedy(serviceKey, definition, config)}{WhereTheSourceCanBeSet(serviceName)}");
+    }
+
+    /// <summary>
+    /// The sources, other than this one and <c>"path"</c>, that would resolve this entry as it stands,
+    /// each asked through its own <see cref="IServiceSource.CanResolve"/> — so a switch is offered only
+    /// where the source itself says it works. Empty when none do.
+    /// </summary>
+    private static Raw SourceSwitchRemedy(Raw serviceKey, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        Raw? names = null;
+        var count = 0;
+
+        foreach (var name in SourceChoices.DisplayOrder)
+        {
+            if (name is "repository" or "path" or "disabled"
+                || !ServiceSourcesBuilderExtensions.Sources.TryGetValue(name, out var source)
+                || !source.CanResolve(definition, config))
+            {
+                continue;
+            }
+
+            var quoted = Raw.Compose($"'{Raw.Escaped(name)}'");
+            names = names is { } previous ? Raw.Compose($"{previous} or {quoted}") : quoted;
+            count++;
+        }
+
+        if (names is not { } offered)
+        {
+            return Raw.Literal("");
+        }
+
+        var which = count == 1 ? Raw.Literal("it") : Raw.Literal("one of them");
+
+        return Raw.Compose($"It would also resolve under {offered}: set '{serviceKey}:source' to {which}. ");
     }
 
     /// <summary>

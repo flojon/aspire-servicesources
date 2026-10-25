@@ -1878,37 +1878,274 @@ public class LocalProjectSourceTests
     }
 
     /// <summary>
-    /// The fail-closed shape: a remedy this guard cannot verify is not offered at all.
+    /// A source switch is offered only when that source's own precondition check says the entry would
+    /// resolve under it. "Declares the block" was the predicate that was not enough: each shape here
+    /// loads fine and then fails under its own source, so offering it printed a remedy that did not
+    /// work when followed.
     /// </summary>
-    /// <remarks>
-    /// Switching the source to <c>url</c>, <c>container</c> or <c>kubernetes</c> works only if that
-    /// source's own preconditions hold — a non-blank url, an image, a service plus a
-    /// developer-config-only context — none of which this guard reads, and each of which grows with
-    /// its own source. A declared block is not enough: a <c>container:</c> with no <c>image:</c>
-    /// loads fine and then fails under its own source, so an entry-shape test printed a remedy that
-    /// did not work when followed. Both declared shapes are exercised here, because "declares the
-    /// block" was exactly the predicate that was not enough.
-    /// </remarks>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Resolve_LocalOnRepositorylessEntry_OffersNoSourceSwitchItCannotVerify(bool container)
+    [InlineData("url")]
+    [InlineData("container")]
+    [InlineData("kubernetes")]
+    public void Resolve_LocalOnRepositorylessEntry_DoesNotOfferASourceWhoseBlockIsUnusable(string source)
     {
-        var definition = container ? RepositorylessContainerDefinition() : RepositorylessDefinition();
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Url = source == "url" ? new UrlMetadata { Url = "" } : null,
+            Container = source == "container" ? new ContainerMetadata { Image = "", Port = 8080 } : null,
+            // A service and a port are declared; what is missing is the developer-config-only context.
+            Kubernetes = source == "kubernetes" ? new KubernetesMetadata { Service = "orders", Port = 80 } : null,
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new FakeGitClient()).Resolve(
                 PlainBuilder(), ServiceName, definition, DevConfig()));
 
-        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain($"'{source}'", ex.Message, StringComparison.Ordinal);
 
         // The one remedy that depends on nothing outside this guard: a directory the developer
         // already has, through the 'path' source rather than the deprecated repository.path exemption.
         Assert.Contains(
             $"ServiceSources:Services:{ServiceName}:path:path", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("local:path", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Resolve_LocalOnRepositorylessEntry_OffersTheSourcesThatWouldResolve(bool container)
+    {
+        var definition = container ? RepositorylessContainerDefinition() : RepositorylessDefinition();
+        var offered = container ? "container" : "url";
+        var notOffered = container ? "url" : "container";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.Contains($"'{offered}'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain($"'{notOffered}'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The container check has to cover everything its own resolution refuses, not only the image and
+    /// port: an unsupported scheme fails under the container source, so it is not offered.
+    /// </summary>
+    [Fact]
+    public void Resolve_LocalOnRepositorylessContainerEntryWithABadScheme_DoesNotOfferContainer()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "",
+            Kind = LocalKinds.Dotnet,
+            Container = new ContainerMetadata { Image = "company/orders", Port = 8080, Scheme = "ftp" },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnRepositorylessEntryWithSeveralResolvableSources_OffersThemAsAChoice()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "",
+            Kind = LocalKinds.Dotnet,
+            Url = new UrlMetadata { Url = "https://orders.example.com" },
+            Container = new ContainerMetadata { Image = "company/orders", Port = 8080 },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.Contains("'container' or 'url'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("one of them", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The query is part of the source contract: a source that does not override it is never offered,
+    /// so each registered source has to answer deliberately. Sources that cannot be a switch target
+    /// from a repositoryless local entry are named here; a new source kind fails this test until it
+    /// either implements <c>CanResolve</c> or is added to that list on purpose.
+    /// </summary>
+    [Fact]
+    public void EveryRegisteredSource_OverridesCanResolve_OrIsDeliberatelyNeverASwitchTarget()
+    {
+        string[] neverOffered = ["repository", "path", "disabled"];
+
+        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
+        {
+            if (neverOffered.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
+            var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
+            Assert.True(
+                map.TargetMethods[index].DeclaringType == source.GetType(),
+                $"Source '{name}' does not implement IServiceSource.CanResolve, so it would never be offered as a switch.");
+        }
+    }
+
+    /// <summary>
+    /// The layering the picker and the error-message switch offer both lean on: a source that would
+    /// resolve as things stand must also be one the picker offers for the entry. Each source states
+    /// the two questions separately, so nothing but this test stops them drifting apart.
+    /// </summary>
+    [Fact]
+    public void EverySourceThatCanResolve_IsAlsoOfferedFor()
+    {
+        var samples = new List<(string Label, ServiceMetadata Metadata)>();
+
+        foreach (var url in new[] { null, "", "  ", "https://orders.example.com", "ftp://orders.example.com", "not a url" })
+        {
+            samples.Add(($"url '{url}'", new ServiceMetadata { Url = new UrlMetadata { Url = url! } }));
+        }
+
+        foreach (var (image, port, scheme) in new (string?, int?, string?)[]
+        {
+            (null, null, null), ("", 8080, null), ("company/orders", null, null), ("company/orders", 0, null),
+            ("company/orders", 70000, null), ("company/orders", 8080, null), ("company/orders", 8080, "https"),
+            ("company/orders", 8080, "gopher"),
+        })
+        {
+            samples.Add(($"container {image}/{port}/{scheme}", new ServiceMetadata
+            {
+                Container = new ContainerMetadata { Image = image!, Port = port, Scheme = scheme },
+            }));
+        }
+
+        foreach (var (service, port, scheme) in new (string?, int?, string?)[]
+        {
+            (null, null, null), ("", 80, null), ("  ", 80, null), ("orders", null, null), ("orders", 0, null),
+            ("orders", 80, null), ("orders", 80, "https"), ("orders", 80, "gopher"),
+        })
+        {
+            samples.Add(($"kubernetes {service}/{port}/{scheme}", new ServiceMetadata
+            {
+                Kubernetes = new KubernetesMetadata { Service = service!, Port = port, Scheme = scheme },
+            }));
+        }
+
+        samples.Add(("empty", new ServiceMetadata()));
+
+        // A url set only in developer config makes UrlSource.CanResolve true for an entry whose
+        // catalog has none, so the config dimension has to vary the url as well as the context.
+        var configs = (from context in new[] { null, "", "dev-cluster" }
+                       from devUrl in new[] { null, "https://dev.example.com", "ftp://dev.example.com" }
+                       select (Context: $"{context}', developer url '{devUrl}", Config: ConfigWith(context, devUrl))).ToList();
+
+        static ServiceDeveloperConfig ConfigWith(string? context, string? devUrl)
+        {
+            var config = DevConfig();
+            config.Kubernetes.Context = context;
+            config.Url.Url = devUrl;
+            return config;
+        }
+
+        var checkedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var resolvable = 0;
+
+        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
+        {
+            var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
+            var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
+            if (map.TargetMethods[index].DeclaringType != source.GetType())
+            {
+                continue;
+            }
+
+            checkedSources.Add(name);
+
+            foreach (var (label, metadata) in samples)
+            {
+                metadata.Repository = "";
+                metadata.Project = "Orders.csproj";
+                metadata.Kind = LocalKinds.Dotnet;
+                var definition = metadata.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+                foreach (var (context, config) in configs)
+                {
+                    if (!source.CanResolve(definition, config))
+                    {
+                        continue;
+                    }
+
+                    resolvable++;
+                    Assert.True(
+                        source.IsOfferedFor(definition),
+                        $"Source '{name}' can resolve '{label}' (kubernetes context '{context}') " +
+                        "but does not offer itself for it.");
+                }
+            }
+        }
+
+        Assert.Contains("url", checkedSources);
+        Assert.Contains("container", checkedSources);
+        Assert.Contains("kubernetes", checkedSources);
+        Assert.True(resolvable >= 3, "The samples should include shapes each source can resolve.");
+    }
+
+    /// <summary>
+    /// A url set only in developer config, with none in the catalog, still makes <c>"url"</c> work
+    /// (<see cref="UrlSource.ResolveUrl"/> reads the developer value first), so the switch is offered.
+    /// </summary>
+    [Fact]
+    public void Resolve_LocalOnRepositorylessEntryWithOnlyADeveloperConfigUrl_OffersUrl()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+        Assert.Null(definition.Url?.Url);
+
+        // Control: with no url anywhere, no switch is offered, so the assertion below can only
+        // pass because of the developer-config url.
+        var without = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(PlainBuilder(), ServiceName, definition, DevConfig()));
+        Assert.DoesNotContain("It would also resolve under", without.Message, StringComparison.Ordinal);
+
+        var config = DevConfig();
+        config.Url.Url = "https://orders.example.com";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(PlainBuilder(), ServiceName, definition, config));
+
+        Assert.Contains("'url'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"{ServiceName}:source", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnRepositorylessKubernetesEntryWithAContext_OffersKubernetes()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Kubernetes = new KubernetesMetadata { Service = "orders", Port = 80 },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+        var config = DevConfig();
+        config.Kubernetes.Context = "dev-cluster";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(PlainBuilder(), ServiceName, definition, config));
+
+        Assert.Contains("'kubernetes'", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

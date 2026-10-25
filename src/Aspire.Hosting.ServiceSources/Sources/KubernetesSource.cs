@@ -42,8 +42,27 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Kubernetes is null ? null : typeof(ServiceExecutableResource);
 
-    public bool IsOfferedFor(ServiceDefinition definition) =>
+    public bool IsOfferedFor(ServiceDefinition definition) => HasService(definition);
+
+    /// <summary>
+    /// Whether the entry names a kubernetes service to forward to: the one precondition
+    /// <see cref="IsOfferedFor"/> reads and <see cref="RequireKubernetesBlock"/> enforces, written once.
+    /// </summary>
+    internal static bool HasService(ServiceDefinition definition) =>
         !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
+
+    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        try
+        {
+            Validate("", definition, config);
+            return true;
+        }
+        catch (ServiceSourcesConfigurationException)
+        {
+            return false;
+        }
+    }
 
     internal static string[] BuildPortForwardArgs(
         string serviceName,
@@ -107,13 +126,13 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     /// </summary>
     private static KubernetesMetadata RequireKubernetesBlock(string serviceName, ServiceDefinition definition)
     {
-        if (definition.Kubernetes is null || string.IsNullOrWhiteSpace(definition.Kubernetes.Service))
+        if (!HasService(definition))
         {
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}' source is 'kubernetes' but {Raw.Origin(definition.Origin)} has no " +
                 $"kubernetes.service entry.");
         }
 
-        return definition.Kubernetes;
+        return definition.Kubernetes!;
     }
 }

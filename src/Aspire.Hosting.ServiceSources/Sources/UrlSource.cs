@@ -67,6 +67,19 @@ internal sealed class UrlSource : IServiceSource
         return ResolvedService.BridgeUnregistered(builder, facade, serviceName, "url");
     }
 
+    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        try
+        {
+            ResolveUrl("", definition, config);
+            return true;
+        }
+        catch (ServiceSourcesConfigurationException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// <paramref name="url"/> with any credentials in it replaced, for the messages that quote it
     /// back.
