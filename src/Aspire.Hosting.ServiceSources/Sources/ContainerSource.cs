@@ -37,6 +37,9 @@ internal sealed class ContainerSource : IServiceSource
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Container is null ? null : typeof(ServiceContainerResource);
 
+    public bool IsOfferedFor(ServiceDefinition definition) =>
+        definition.Container is { Port: >= 1 and <= 65535 } container && !string.IsNullOrWhiteSpace(container.Image);
+
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {

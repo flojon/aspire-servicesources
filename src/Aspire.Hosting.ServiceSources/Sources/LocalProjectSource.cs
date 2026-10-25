@@ -480,6 +480,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
     }
 
+    public bool IsOfferedFor(ServiceDefinition definition) => LocalGitCheckout.HasRepositoryToClone(definition);
+
     /// <remarks>
     /// Always answers: a developer's own <c>repository.path</c> makes <c>"repository"</c> selectable
     /// even for an entry with no repository.

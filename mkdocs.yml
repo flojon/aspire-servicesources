@@ -79,6 +79,7 @@ nav:
       - YAML catalog (advanced): guides/yaml-catalog.md
       - Non-.NET services: guides/non-dotnet-services.md
       - Configuration: guides/configuration.md
+      - Choosing a source in the dashboard: guides/interactive-configuration.md
       - Backing services: guides/backing-services.md
   - Troubleshooting: troubleshooting.md
   - Changelog: https://github.com/flojon/aspire-servicesources/blob/main/CHANGELOG.md
