@@ -45,6 +45,19 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     public bool IsOfferedFor(ServiceDefinition definition) =>
         !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
 
+    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        try
+        {
+            Validate("", definition, config);
+            return true;
+        }
+        catch (ServiceSourcesConfigurationException)
+        {
+            return false;
+        }
+    }
+
     internal static string[] BuildPortForwardArgs(
         string serviceName,
         ServiceDefinition definition,

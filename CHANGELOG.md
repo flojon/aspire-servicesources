@@ -50,6 +50,15 @@ never existed. Check the tag of the last release before adding one.
   an opaque `WithEnvironment(context => ...)` callback, and one that reaches it through a
   connection string built from its endpoint.
 
+### Changed
+
+- **The error for `source: repository` on a service whose catalog entry has no repository now offers
+  a switch to `url`, `container` or `kubernetes` again, but only where that source would actually
+  resolve the entry** ([#378]). Each source answers for itself, through the same validation its own
+  resolution runs, so a `url:` block with a blank url, a `container:` with no `image:`, or a
+  `kubernetes:` entry with no `kubernetes.context` is not offered. The `path` remedy and the list of
+  configuration layers that can set `source` are unchanged.
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking
@@ -2127,6 +2136,7 @@ Targets `net10.0`.
 [#362]: https://github.com/flojon/aspire-servicesources/issues/362
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
+[#378]: https://github.com/flojon/aspire-servicesources/issues/378
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
