@@ -57,7 +57,8 @@ internal interface IServiceSource
     /// The stricter sibling of <see cref="IsOfferedFor"/>: that one reads the catalog entry alone and
     /// serves the picker, which can ask for values the entry lacks, so it may say yes where this says
     /// no. This one means "works as it stands", and a source answering yes here should also answer
-    /// yes to <see cref="IsOfferedFor"/>.
+    /// yes to <see cref="IsOfferedFor"/>. A test over the registered sources enforces that
+    /// implication on sample entries and configs, so a source that drifts fails it.
     /// </para>
     /// </remarks>
     bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) => false;

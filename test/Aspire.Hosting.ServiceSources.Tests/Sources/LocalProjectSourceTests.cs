@@ -1999,6 +1999,98 @@ public class LocalProjectSourceTests
         }
     }
 
+    /// <summary>
+    /// The layering the picker and the error-message switch offer both lean on: a source that would
+    /// resolve as things stand must also be one the picker offers for the entry. Each source states
+    /// the two questions separately, so nothing but this test stops them drifting apart.
+    /// </summary>
+    [Fact]
+    public void EverySourceThatCanResolve_IsAlsoOfferedFor()
+    {
+        var samples = new List<(string Label, ServiceMetadata Metadata)>();
+
+        foreach (var url in new[] { null, "", "  ", "https://orders.example.com", "ftp://orders.example.com", "not a url" })
+        {
+            samples.Add(($"url '{url}'", new ServiceMetadata { Url = new UrlMetadata { Url = url! } }));
+        }
+
+        foreach (var (image, port, scheme) in new (string?, int?, string?)[]
+        {
+            (null, null, null), ("", 8080, null), ("company/orders", null, null), ("company/orders", 0, null),
+            ("company/orders", 70000, null), ("company/orders", 8080, null), ("company/orders", 8080, "https"),
+            ("company/orders", 8080, "gopher"),
+        })
+        {
+            samples.Add(($"container {image}/{port}/{scheme}", new ServiceMetadata
+            {
+                Container = new ContainerMetadata { Image = image!, Port = port, Scheme = scheme },
+            }));
+        }
+
+        foreach (var (service, port, scheme) in new (string?, int?, string?)[]
+        {
+            (null, null, null), ("", 80, null), ("  ", 80, null), ("orders", null, null), ("orders", 0, null),
+            ("orders", 80, null), ("orders", 80, "https"), ("orders", 80, "gopher"),
+        })
+        {
+            samples.Add(($"kubernetes {service}/{port}/{scheme}", new ServiceMetadata
+            {
+                Kubernetes = new KubernetesMetadata { Service = service!, Port = port, Scheme = scheme },
+            }));
+        }
+
+        samples.Add(("empty", new ServiceMetadata()));
+
+        var configs = new[] { null, "", "dev-cluster" }.Select(context =>
+        {
+            var config = DevConfig();
+            config.Kubernetes.Context = context;
+            return (Context: context, Config: config);
+        }).ToList();
+
+        var checkedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var resolvable = 0;
+
+        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
+        {
+            var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
+            var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
+            if (map.TargetMethods[index].DeclaringType != source.GetType())
+            {
+                continue;
+            }
+
+            checkedSources.Add(name);
+
+            foreach (var (label, metadata) in samples)
+            {
+                metadata.Repository = "";
+                metadata.Project = "Orders.csproj";
+                metadata.Kind = LocalKinds.Dotnet;
+                var definition = metadata.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+                foreach (var (context, config) in configs)
+                {
+                    if (!source.CanResolve(definition, config))
+                    {
+                        continue;
+                    }
+
+                    resolvable++;
+                    Assert.True(
+                        source.IsOfferedFor(definition),
+                        $"Source '{name}' can resolve '{label}' (kubernetes context '{context}') " +
+                        "but does not offer itself for it.");
+                }
+            }
+        }
+
+        Assert.Contains("url", checkedSources);
+        Assert.Contains("container", checkedSources);
+        Assert.Contains("kubernetes", checkedSources);
+        Assert.True(resolvable >= 3, "The samples should include shapes each source can resolve.");
+    }
+
     [Fact]
     public void Resolve_LocalOnRepositorylessKubernetesEntryWithAContext_OffersKubernetes()
     {
