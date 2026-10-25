@@ -38,58 +38,30 @@ internal sealed class ContainerSource : IServiceSource
         definition.Container is null ? null : typeof(ServiceContainerResource);
 
     public bool IsOfferedFor(ServiceDefinition definition) =>
-        TryGetImageAndPort(definition, out _, out _) == ContainerConfigProblem.None;
-
-    private enum ContainerConfigProblem { None, NoImage, NoPort, PortOutOfRange }
-
-    private static ContainerConfigProblem TryGetImageAndPort(ServiceDefinition definition, out string image, out int port)
-    {
-        image = "";
-        port = 0;
-
-        if (definition.Container is null || string.IsNullOrWhiteSpace(definition.Container.Image))
-        {
-            return ContainerConfigProblem.NoImage;
-        }
-
-        if (definition.Container.Port is not { } declaredPort)
-        {
-            return ContainerConfigProblem.NoPort;
-        }
-
-        if (declaredPort is < 1 or > 65535)
-        {
-            port = declaredPort;
-            return ContainerConfigProblem.PortOutOfRange;
-        }
-
-        image = definition.Container.Image;
-        port = declaredPort;
-        return ContainerConfigProblem.None;
-    }
+        definition.Container is { Port: >= 1 and <= 65535 } container && !string.IsNullOrWhiteSpace(container.Image);
 
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        var problem = TryGetImageAndPort(definition, out var image, out var port);
-
-        switch (problem)
+        if (definition.Container is null || string.IsNullOrWhiteSpace(definition.Container.Image))
         {
-            case ContainerConfigProblem.NoImage:
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
-                    + $"container.image entry.");
-            case ContainerConfigProblem.NoPort:
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
-                    + $"container.port entry.");
-            case ContainerConfigProblem.PortOutOfRange:
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
+                + $"container.image entry.");
         }
 
-        var tag = string.IsNullOrWhiteSpace(config.Container.Tag) ? definition.Container?.DefaultTag : config.Container.Tag;
+        var port = definition.Container.Port ?? throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
+            + $"container.port entry.");
 
-        return (image, tag, port);
+        if (port is < 1 or > 65535)
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
+        }
+
+        var tag = string.IsNullOrWhiteSpace(config.Container.Tag) ? definition.Container.DefaultTag : config.Container.Tag;
+
+        return (definition.Container.Image, tag, port);
     }
 }

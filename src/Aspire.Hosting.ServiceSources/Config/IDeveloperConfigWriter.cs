@@ -137,41 +137,17 @@ internal sealed class JsonFileDeveloperConfigWriter : IDeveloperConfigWriter
     {
         error = null;
 
-        FileAttributes attributes;
-        try
-        {
-            attributes = File.GetAttributes(_path);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return new JsonObject();
-        }
-
-        // A link is not replaced: renaming over it would sever it from what it points at.
-        if (attributes.HasFlag(FileAttributes.Directory) || attributes.HasFlag(FileAttributes.ReparsePoint))
-        {
-            error = $"{_path} is not a regular file.";
-            return null;
-        }
-
         byte[] bytes;
-        using (var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+        switch (BoundedFile.TryRead(_path, MaxBytes, out bytes))
         {
-            var buffer = new byte[MaxBytes + 1];
-            var length = 0;
-            int read;
-            while (length < buffer.Length && (read = stream.Read(buffer, length, buffer.Length - length)) > 0)
-            {
-                length += read;
-            }
-
-            if (length > MaxBytes)
-            {
+            case BoundedReadStatus.Missing:
+                return new JsonObject();
+            case BoundedReadStatus.NotRegularFile:
+                error = $"{_path} is not a regular file.";
+                return null;
+            case BoundedReadStatus.TooLarge:
                 error = $"{_path} is larger than {MaxBytes} bytes.";
                 return null;
-            }
-
-            bytes = buffer[..length];
         }
 
         // The configuration reader accepts a BOM; JsonNode.Parse does not.
