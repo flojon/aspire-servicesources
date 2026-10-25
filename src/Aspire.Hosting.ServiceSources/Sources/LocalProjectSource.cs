@@ -334,7 +334,41 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
             + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or {PathSourceRemedy(serviceKey, definition)} "
-            + $"{WhereTheSourceCanBeSet(serviceName)}");
+            + $"{SourceSwitchRemedy(serviceKey, definition, config)}{WhereTheSourceCanBeSet(serviceName)}");
+    }
+
+    /// <summary>
+    /// The sources, other than this one and <c>"path"</c>, that would resolve this entry as it stands,
+    /// each asked through its own <see cref="IServiceSource.CanResolve"/> — so a switch is offered only
+    /// where the source itself says it works. Empty when none do.
+    /// </summary>
+    private static Raw SourceSwitchRemedy(Raw serviceKey, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        Raw? names = null;
+        var count = 0;
+
+        foreach (var name in SourceChoices.DisplayOrder)
+        {
+            if (name is "repository" or "path" or "disabled"
+                || !ServiceSourcesBuilderExtensions.Sources.TryGetValue(name, out var source)
+                || !source.CanResolve(definition, config))
+            {
+                continue;
+            }
+
+            var quoted = Raw.Compose($"'{Raw.Escaped(name)}'");
+            names = names is { } previous ? Raw.Compose($"{previous} or {quoted}") : quoted;
+            count++;
+        }
+
+        if (names is not { } offered)
+        {
+            return Raw.Literal("");
+        }
+
+        var which = count == 1 ? Raw.Literal("it") : Raw.Literal("one of them");
+
+        return Raw.Compose($"It would also resolve under {offered}: set '{serviceKey}:source' to {which}. ");
     }
 
     /// <summary>
