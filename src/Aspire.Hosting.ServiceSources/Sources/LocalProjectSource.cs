@@ -311,13 +311,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// has, so nothing is ever cloned and the absent <c>repository</c> costs that configuration
     /// nothing.
     /// <para>
-    /// The message offers only remedies this guard itself can verify. Switching to <c>url</c>,
-    /// <c>container</c> or <c>kubernetes</c> works only if that source's own preconditions hold —
-    /// none of which is readable from here — so it is not offered; a declared block is not proof
-    /// those preconditions hold either. The remedies offered are declaring a repository and the
-    /// <c>"path"</c> source with a <c>path.path</c> override — the non-deprecated form of the
-    /// <c>repository.path</c> exemption above — and the configuration key is named in every layer
-    /// that can set it.
+    /// The message names the remedies it can stand behind. A switch to <c>url</c>, <c>container</c>
+    /// or <c>kubernetes</c> is offered only for a source whose own
+    /// <see cref="IServiceSource.CanResolve"/> says the entry would resolve under it as things
+    /// stand (see <see cref="SourceSwitchRemedy"/>); a declared block is not proof its preconditions
+    /// hold, so a source that cannot resolve is left out. The other remedies are declaring a
+    /// repository and the <c>"path"</c> source with a <c>path.path</c> override — the
+    /// non-deprecated form of the <c>repository.path</c> exemption above — and the configuration
+    /// key is named in every layer that can set it.
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
