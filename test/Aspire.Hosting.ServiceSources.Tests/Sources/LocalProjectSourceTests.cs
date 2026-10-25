@@ -2041,12 +2041,19 @@ public class LocalProjectSourceTests
 
         samples.Add(("empty", new ServiceMetadata()));
 
-        var configs = new[] { null, "", "dev-cluster" }.Select(context =>
+        // A url set only in developer config makes UrlSource.CanResolve true for an entry whose
+        // catalog has none, so the config dimension has to vary the url as well as the context.
+        var configs = (from context in new[] { null, "", "dev-cluster" }
+                       from devUrl in new[] { null, "https://dev.example.com", "ftp://dev.example.com" }
+                       select (Context: $"{context}', developer url '{devUrl}", Config: ConfigWith(context, devUrl))).ToList();
+
+        static ServiceDeveloperConfig ConfigWith(string? context, string? devUrl)
         {
             var config = DevConfig();
             config.Kubernetes.Context = context;
-            return (Context: context, Config: config);
-        }).ToList();
+            config.Url.Url = devUrl;
+            return config;
+        }
 
         var checkedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var resolvable = 0;
@@ -2089,6 +2096,37 @@ public class LocalProjectSourceTests
         Assert.Contains("container", checkedSources);
         Assert.Contains("kubernetes", checkedSources);
         Assert.True(resolvable >= 3, "The samples should include shapes each source can resolve.");
+    }
+
+    /// <summary>
+    /// A url set only in developer config, with none in the catalog, still makes <c>"url"</c> work
+    /// (<see cref="UrlSource.ResolveUrl"/> reads the developer value first), so the switch is offered.
+    /// </summary>
+    [Fact]
+    public void Resolve_LocalOnRepositorylessEntryWithOnlyADeveloperConfigUrl_OffersUrl()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+        Assert.Null(definition.Url?.Url);
+
+        // Control: with no url anywhere, no switch is offered, so the assertion below can only
+        // pass because of the developer-config url.
+        var without = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(PlainBuilder(), ServiceName, definition, DevConfig()));
+        Assert.DoesNotContain("It would also resolve under", without.Message, StringComparison.Ordinal);
+
+        var config = DevConfig();
+        config.Url.Url = "https://orders.example.com";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(PlainBuilder(), ServiceName, definition, config));
+
+        Assert.Contains("'url'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"{ServiceName}:source", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
