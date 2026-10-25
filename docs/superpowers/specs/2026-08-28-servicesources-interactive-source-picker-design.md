@@ -14,8 +14,8 @@ service whose source is already known, where this defers the *choice*; #271 / #4
 `.servicesources/selection.json`; #134 (code-authored catalog) and #69 (developer config through
 `IConfiguration`) have merged and change where this design reads and writes; #8 (CLI configuration
 UX) is served by the same `PromptInputsAsync` implementation; #43 (per-source field validation) is
-reused rather than duplicated; #54 (third-party sources, still open) would be picked up by
-deriving the source list from the source dictionary once that can be extended.
+reused rather than duplicated; #54 (third-party sources, still open) would need its sources added to
+the picker's display order once the source dictionary can be extended.
 **Corrected by:** the review on PR #128 — an earlier draft claimed a checkout could never precede
 a prompt within one run (see *The prompt cannot precede a type choice within a single run*), raised
 the prompt from an event that deadlocks behind `WaitFor` (see *Interactions raised at startup*),
@@ -148,15 +148,15 @@ until the wait resolves, and a placeholder never reaches `Running`. A consumer t
 `WaitFor(orders)` would keep the event from firing, so the prompt that could unblock it would never
 appear. #428 hit the same trap and moved to `BeforeStartEvent`, running the dialog on a task nobody
 awaits (`DeferredCheckout`, the comment above its subscription); this design does the same. The
-placeholder must also not hold a consumer back, and that mechanism is **not yet verified for a
-registered resource**. `url` and `disabled` get it from `UnregisteredServiceStartupGuard`, which strips
-the consumer's `WaitAnnotation` at `BeforeStartEvent` because their facade is unregistered
-(`ServiceResource` deliberately omits `IResourceWithoutLifetime`, as the marker would also suppress
-`WaitFor` on `container`/`kubernetes`/`repository`). The placeholder is registered, so either it
-carries `IResourceWithoutLifetime` — which should make Aspire ignore the wait, to be measured — or the
-guard's source list grows to include it. Both halves are needed: the event choice keeps the prompt
-reachable, and one of these keeps the consumer starting. The wait-safety test below pins whichever is
-chosen.
+placeholder must also not hold a consumer back. `url` and `disabled` get that from
+`UnregisteredServiceStartupGuard`, which strips the consumer's `WaitAnnotation` at `BeforeStartEvent`
+because their facade is unregistered (`ServiceResource` deliberately omits `IResourceWithoutLifetime`,
+as the marker would also suppress `WaitFor` on `container`/`kubernetes`/`repository`). The placeholder
+is registered, so it carries `IResourceWithoutLifetime` instead, and Aspire ignores the wait. Both
+halves are needed: the event choice keeps the prompt reachable, and the marker keeps the consumer
+starting. Pinned by tests against a started AppHost model: a consumer that `WaitFor`s a placeholder
+still starts, and the prompt is still raised. What is not covered is a full DCP run with a real
+consumer process.
 
 ### A consumer can reference an endpoint-less placeholder safely
 
@@ -268,8 +268,10 @@ changes — a contained change, and a reason to keep its construction in one pla
 spread across the picker. The same proposal's first layer fixes microsoft/aspire#13647, where
 `DCPExecutor` clobbers custom state published through `PublishUpdateAsync`. That should not reach
 a plain `Resource` subclass, which DCP does not manage, but the placeholder publishes a custom
-state and a custom property, so **confirm it survives a DCP watch cycle when implementing** rather
-than assuming it does. Both are on the watch list in #83.
+state and a custom property, so it is not assumed to survive a DCP watch cycle. A test checks that
+the snapshot outlives the startup orchestrator's republish, but it needs a real DCP and dashboard and
+is skipped unless `SERVICESOURCES_TEST_DCP_CLI` and `SERVICESOURCES_TEST_DCP_DASHBOARD` are set, so
+it has not run in CI. Both are on the watch list in #83.
 
 ### Option not taken: speculatively registering a deferred project
 
@@ -303,8 +305,8 @@ one dialog instead of ten.
 The choice list is derived from the source dictionary `AddService` resolves through, which is a
 private, closed set today: `repository`, `container`, `url`, `kubernetes`, `path` and `disabled`.
 `disabled` is the way to say "I don't want this service" and stops it being asked about again. A
-third-party source (#54, still open) would appear without touching this code once that dictionary
-can be extended; until then there is nothing to derive beyond those six.
+third-party source (#54, still open) would need adding to the picker's display order
+(`SourceChoices.DisplayOrder`) as well as to that dictionary; until then there is nothing beyond those six.
 
 **The list is filtered per service, not offered whole.** A source is only a valid answer where the
 service's catalog entry declares what it needs, and picking one without it would throw at the next
@@ -356,9 +358,10 @@ services get this dialog and the configured, undecided cold checkouts get #428's
 different questions and neither can be folded into the other — a placeholder cannot be a checkout
 candidate until a source exists, which is next run — so the dialogs are titled by their question. Their order is not controlled: each runs on its own
 task from its own `BeforeStartEvent` handler, and handler order is subscription order, which depends
-on whether the first deferred service or the first placeholder is added first. Whether Aspire shows
-two pending prompts together or one after the other has not been verified here, and should be checked
-before this ships. When no service has a source, only this dialog appears; once every service has one,
+on whether the first deferred service or the first placeholder is added first. A test with
+a fake interaction service pins that both prompts are outstanding at once, each for its own services,
+and neither cancels the other. How the real dashboard shows two pending prompts, together or one
+after the other, has not been verified. When no service has a source, only this dialog appears; once every service has one,
 only #428's can; a partly configured file, or a catalog `defaultSource` on some services, gives both.
 
 **Pull.** Each placeholder also carries a `Configure` command, so a service added to

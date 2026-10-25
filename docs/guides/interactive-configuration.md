@@ -11,7 +11,9 @@ builder.UseInteractiveServiceConfiguration();
 var orders = builder.AddService("orders");
 ```
 
-The call is opt-in: without it nothing changes. A service that is not in the catalog at all still
+The call is opt-in: without it nothing changes. Make it before the first `AddService`; a service
+added earlier has already thrown, because whether to build a placeholder is decided when the
+service is added. A service that is not in the catalog at all still
 throws, since that is a mistake in the AppHost rather than something to answer in a dialog. So does
 a service whose configured source is invalid: only a missing source becomes a placeholder.
 
@@ -48,17 +50,52 @@ raises the same dialog for that one service, if you dismissed it or want to answ
 
 Answers are merged into `servicesources.local.json` next to the AppHost, leaving every other
 entry as it was. That file is the lowest-precedence configuration layer, so it can still be
-overridden from `appsettings`, user secrets, environment variables or the command line.
+overridden from `appsettings`, user secrets, environment variables or the command line. Choosing
+`kubernetes` for `orders` with context `dev` and port `8080` writes:
+
+```json
+{
+  "services": {
+    "orders": {
+      "source": "kubernetes",
+      "kubernetes": { "context": "dev", "port": "8080" }
+    }
+  }
+}
+```
 
 - **It takes effect on the next run.** The placeholder cannot turn into a real resource while the
   AppHost is running; restart it. The dashboard says so when the answer is saved.
-- **A file with comments is refused.** Saving would drop them, so the dialog reports the problem
-  and leaves the file alone; edit it by hand instead.
+- **Some files are refused, and left byte-for-byte as they were.** The dashboard says why. The
+  file is refused when it:
+  - contains comments, which saving would drop;
+  - is not valid JSON, including a key that appears twice in one object (keys are
+    case-insensitive);
+  - does not have a JSON object at its root, or has a non-object (other than `null`) where
+    `services` or the service's entry goes;
+  - is a directory or a symbolic link, since replacing it would sever the link;
+  - is larger than 256 KiB;
+  - already holds fields for that service that would fail the next run (say an empty `url.url`
+    hiding the catalog's URL, or an unsupported `kubernetes.scheme`). The whole entry is checked as
+    it would be written, not only your new answers. Edit the file by hand to fix it.
+
+  A byte order mark and trailing commas are accepted, and a `null` where an object goes counts as
+  missing, as it does when the file is read.
 - **A higher layer can keep it from applying.** If a provider above the file sets the service's
-  `source` to blank, the saved choice is shadowed. The dashboard names the provider, and the choice
-  takes effect once that provider stops setting it.
+  `source` to blank, the saved choice is shadowed. The dashboard names the file or kind of layer, and
+  the choice takes effect once you remove that setting.
 - **A linked git worktree writes its own copy** of the file; it does not change the main
   worktree's.
+
+### Known limits
+
+- **Configure reports success when nothing was saved.** The command succeeds once the dialog has
+  run, including when you close it or the save is refused. The outcome is in the notification and
+  the log.
+- **The write lock is in-process only.** Two dialogs in one AppHost cannot interleave their writes,
+  but another process, or an editor, saving the file at the same moment can lose a change.
+- **A `path` directory that comes from the catalog is not checked when you save.** A broken catalog
+  `path:` only fails on the next run. A directory you type in the dialog is checked.
 
 ## When it is off
 
