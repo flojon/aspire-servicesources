@@ -58,6 +58,7 @@ internal sealed class UrlSource : IServiceSource
         facade.Annotations.Add(endpoint);
 
         UnregisteredServiceStartupGuard.EnsureRegistered(builder);
+        UnregisteredServiceStartupGuard.TrackUrlService(builder, facade);
 
         return ResolvedService.BridgeUnregistered(builder, facade, serviceName, "url");
     }

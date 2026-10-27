@@ -64,7 +64,9 @@ cleanup() {
   # Aspire/DCP doesn't reliably stop containers it started when the apphost is
   # killed rather than shut down cleanly, so sweep any leftover echo containers.
   docker ps -q --filter "ancestor=${ECHO_IMAGE}:${ECHO_TAG}" | xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker ps -aq --filter "name=urlconsumer" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  for name in urlconsumer urlcallback urlconnstr; do
+    docker ps -aq --filter "name=$name" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  done
 
   cp "$yaml_backup" "$apphost_dir/servicesources.yaml"
   if [[ $had_local_json -eq 1 ]]; then
@@ -203,3 +205,31 @@ docker exec "$consumer_id" wget -q -O - "${REACHABLE_URL}/get" | grep -q '"url"'
   || fail_with_apphost_log "the container could not fetch ${REACHABLE_URL} from inside"
 
 log "PASS: a container referencing a 'url' service was handed the URL and could reach it"
+
+# The two forms that leave no annotation naming the service: an opaque WithEnvironment callback, and a
+# connection string built from the service's endpoint. Both used to fail to start without a word.
+wait_for_container() {
+  local name="$1" id=""
+  for _ in $(seq 1 60); do
+    id="$(docker ps -q --filter "name=$name" | head -n1 || true)"
+    [[ -n "$id" ]] && break
+    sleep 1
+  done
+  printf '%s' "$id"
+}
+
+log "checking the container that sets the URL in an opaque callback"
+callback_id="$(wait_for_container urlcallback)"
+[[ -n "$callback_id" ]] || fail_with_apphost_log "the container using an opaque callback never started"
+callback_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$callback_id")"
+[[ "$callback_env" == *"INVENTORY_URL=${REACHABLE_URL}"* ]] \
+  || fail_with_apphost_log "INVENTORY_URL was not ${REACHABLE_URL}: $callback_env"
+
+log "checking the container that references a connection string built from the URL"
+connstr_id="$(wait_for_container urlconnstr)"
+[[ -n "$connstr_id" ]] || fail_with_apphost_log "the container referencing a connection string never started"
+connstr_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$connstr_id")"
+[[ "$connstr_env" == *"ConnectionStrings__inventorycs=Endpoint=${REACHABLE_URL};Key=x"* ]] \
+  || fail_with_apphost_log "ConnectionStrings__inventorycs did not carry ${REACHABLE_URL}: $connstr_env"
+
+log "PASS: an opaque callback and a connection string both handed the container the URL"
