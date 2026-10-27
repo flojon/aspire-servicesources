@@ -185,22 +185,102 @@ public class UrlContainerReferenceTests
     }
 
     [Fact]
-    public async Task WithEnvironment_OpaqueLambdaAlone_IsNotRewritten()
+    public async Task WithEnvironment_OpaqueLambdaAlone_BecomesLiteral()
     {
         var (builder, inventory, storefront) = Arrange();
         var endpoint = inventory.GetEndpoint("https");
-        var before = storefront.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Count();
         storefront.WithEnvironment(ctx => ctx.EnvironmentVariables["C"] = endpoint);
-        // The kept gap: nothing in the shape names the service, so the consumer is not matched.
-        // (WithEnvironment(lambda) leaves no EndpointReferenceAnnotation and no relationship.)
-        var annotations = storefront.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().ToArray();
 
         await TestHelpers.PublishBeforeStartEventAsync(builder);
-
-        Assert.Equal(annotations, storefront.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
-        Assert.Equal(before + 1, annotations.Length);
         var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
-        Assert.IsType<EndpointReference>(env["C"]);
+
+        Assert.Equal(Literal, env["C"]);
+    }
+
+    [Fact]
+    public async Task WithArgs_OpaqueLambdaAlone_BecomesLiteral()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var endpoint = inventory.GetEndpoint("https");
+        storefront.WithArgs(ctx => ctx.Args.Add(endpoint));
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var args = await CallbackRunner.ArgsAsync(storefront.Resource);
+
+        Assert.Equal(Literal, Assert.Single(args));
+    }
+
+    [Fact]
+    public async Task WithReference_ConnectionStringBuiltFromTheEndpoint_BecomesLiteral()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var connection = builder.AddConnectionString(
+            "inventorycs", ReferenceExpression.Create($"Endpoint={inventory.GetEndpoint("https")};Key=x"));
+        storefront.WithReference(connection);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        Assert.Equal($"Endpoint={Literal};Key=x", env["ConnectionStrings__inventorycs"]);
+    }
+
+    [Fact]
+    public async Task WithReference_ConnectionStringWithASecret_KeepsTheSecretAsAProvider()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var secret = builder.AddParameter("api-key", "s3cret", secret: true);
+        var connection = builder.AddConnectionString(
+            "inventorycs", ReferenceExpression.Create($"Endpoint={inventory.GetEndpoint("https")};Key={secret.Resource}"));
+        storefront.WithReference(connection);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        var rewritten = Assert.IsType<ReferenceExpression>(env["ConnectionStrings__inventorycs"]);
+        Assert.Equal($"Endpoint={Literal};Key={{0}}", rewritten.Format);
+        Assert.Same(secret.Resource, Assert.Single(rewritten.ValueProviders));
+    }
+
+    [Fact]
+    public async Task WithEnvironment_ConnectionStringInsideAnExpression_BecomesLiteral()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var connection = builder.AddConnectionString(
+            "inventorycs", ReferenceExpression.Create($"Endpoint={inventory.GetEndpoint("https")}"));
+        storefront.WithEnvironment("CS", ReferenceExpression.Create($"{connection.Resource};Extra=1"));
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        Assert.Equal($"Endpoint={Literal};Extra=1", env["CS"]);
+    }
+
+    [Fact]
+    public async Task WithReference_ConnectionStringNotBuiltFromTheService_IsUntouched()
+    {
+        var (builder, _, storefront) = Arrange();
+        var connection = builder.AddConnectionString("other", ReferenceExpression.Create($"Server=db"));
+        storefront.WithReference(connection);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        Assert.IsType<ConnectionStringReference>(env["ConnectionStrings__other"]);
+    }
+
+    [Fact]
+    public async Task AContainerThatDoesNotUseTheService_KeepsItsValues()
+    {
+        var (builder, _, storefront) = Arrange();
+        var other = builder.AddContainer("other", "nginx:alpine").WithHttpEndpoint(targetPort: 80, name: "http");
+        var otherEndpoint = other.GetEndpoint("http");
+        storefront.WithEnvironment("PLAIN", "value").WithEnvironment("OTHER", otherEndpoint);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        Assert.Equal("value", env["PLAIN"]);
+        Assert.Same(otherEndpoint.Resource, Assert.IsType<EndpointReference>(env["OTHER"]).Resource);
     }
 
     [Fact]

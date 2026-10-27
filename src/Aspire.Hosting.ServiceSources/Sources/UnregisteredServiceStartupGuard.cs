@@ -17,10 +17,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// consumes <c>"url"</c>'s eagerly-set <see cref="AllocatedEndpoint"/>, and <c>"disabled"</c>
 /// registers no <see cref="EndpointAnnotation"/> for a container to trip over.
 /// <para>
-/// The rewrite runs in this handler, so one subscribed earlier, or a later one that adds a consuming
-/// annotation afterwards, escapes it. A container consuming a <c>"url"</c> service through an opaque
-/// callback alone, or through a connection string built from its endpoint, leaves nothing to match
-/// and is not rewritten either.
+/// The rewrite runs in this handler, so a later handler that adds a consuming annotation escapes it.
+/// It applies to every container, not just those whose annotations name a <c>"url"</c> service: an
+/// opaque callback or a connection string reaches the service without leaving such an annotation.
 /// </para>
 /// </remarks>
 internal static class UnregisteredServiceStartupGuard
@@ -30,14 +29,41 @@ internal static class UnregisteredServiceStartupGuard
 
     /// <summary>Subscribes (once per builder) the <c>BeforeStartEvent</c> pre-flight below.</summary>
     public static void EnsureRegistered(IDistributedApplicationBuilder builder) =>
-        Registrations.GetValue(builder, static _ => new CheckRegistration()).EnsureRegistered(builder);
+        RegistrationFor(builder).EnsureRegistered(builder);
+
+    /// <summary>
+    /// Records a <c>"url"</c>-sourced facade for the container rewrite. The facade is never added to the
+    /// model, and a consumer reaching it through a callback or connection string leaves no annotation naming it.
+    /// </summary>
+    public static void TrackUrlService(IDistributedApplicationBuilder builder, ServiceResource facade) =>
+        RegistrationFor(builder).Track(facade);
+
+    private static CheckRegistration RegistrationFor(IDistributedApplicationBuilder builder) =>
+        Registrations.GetValue(builder, static _ => new CheckRegistration());
 
     /// <summary>Keyed weakly; guarded since <c>AddService</c> can run concurrently (xUnit does).</summary>
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, CheckRegistration> Registrations = new();
 
     private sealed class CheckRegistration
     {
+        private readonly List<ServiceResource> _urlServices = [];
         private bool _registered;
+
+        public void Track(ServiceResource facade)
+        {
+            lock (this)
+            {
+                _urlServices.Add(facade);
+            }
+        }
+
+        public ServiceResource[] UrlServices()
+        {
+            lock (this)
+            {
+                return [.. _urlServices];
+            }
+        }
 
         public void EnsureRegistered(IDistributedApplicationBuilder builder)
         {
@@ -49,23 +75,23 @@ internal static class UnregisteredServiceStartupGuard
                 }
 
                 _registered = true;
-                Subscribe(builder);
+                Subscribe(builder, this);
             }
         }
     }
 
-    private static void Subscribe(IDistributedApplicationBuilder builder)
+    private static void Subscribe(IDistributedApplicationBuilder builder, CheckRegistration registration)
     {
         builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
         {
             var logger = (ILogger?)@event.Services.GetService<ILoggerFactory>()?.CreateLogger("Aspire.Hosting.ServiceSources")
                 ?? NullLogger.Instance;
 
-            foreach (var consumer in @event.Model.Resources.OfType<ContainerResource>())
-            {
-                var urlServices = ConsumedUrlServices(consumer);
+            var urlServices = registration.UrlServices();
 
-                if (urlServices.Count > 0)
+            if (urlServices.Length > 0)
+            {
+                foreach (var consumer in @event.Model.Resources.OfType<ContainerResource>())
                 {
                     UrlContainerReferenceRewrite.Apply(consumer, urlServices, logger);
                 }
@@ -140,55 +166,6 @@ internal static class UnregisteredServiceStartupGuard
         WaitType.WaitUntilStarted => "WaitForStart",
         _ => "WaitFor",
     };
-
-    /// <summary>
-    /// Aspire's relationship type for a resource one depends on, as opposed to the <c>"Parent"</c>
-    /// that <c>WithParentRelationship</c> records. Not exposed as a constant by Aspire.
-    /// </summary>
-    private const string ReferenceRelationship = "Reference";
-
-    /// <summary>
-    /// The <c>"url"</c>-sourced services <paramref name="consumer"/> consumes; empty if it consumes none.
-    /// </summary>
-    /// <remarks>
-    /// Matches both shapes Aspire leaves depending on how the AppHost wrote the dependency:
-    /// <c>WithReference(service)</c> (<see cref="EndpointReferenceAnnotation"/>) and
-    /// <c>WithEnvironment("X", service.GetEndpoint(...))</c> (<see cref="ResourceRelationshipAnnotation"/>,
-    /// narrowed to <see cref="ReferenceRelationship"/> so <c>WithParentRelationship</c> isn't failed).
-    /// A dependency reaching DCP some other way (an opaque callback alone, a hand-written annotation,
-    /// a connection string) isn't caught here, and so is not rewritten.
-    /// </remarks>
-    private static List<ServiceResource> ConsumedUrlServices(ContainerResource consumer)
-    {
-        var found = new List<ServiceResource>();
-
-        foreach (var annotation in consumer.Annotations)
-        {
-            IResource? consumed = annotation switch
-            {
-                EndpointReferenceAnnotation endpointReference => endpointReference.Resource,
-                ResourceRelationshipAnnotation relationship
-                    when string.Equals(relationship.Type, ReferenceRelationship, StringComparison.Ordinal)
-                    => relationship.Resource,
-                _ => null,
-            };
-
-            if (consumed is ServiceResource candidate && IsUrlSourcedService(candidate) && !found.Contains(candidate))
-            {
-                found.Add(candidate);
-            }
-        }
-
-        return found;
-    }
-
-    /// <summary>
-    /// Whether <paramref name="resource"/> is the <c>"url"</c>-sourced facade — narrower than
-    /// <see cref="UnregisteredSourceOf"/>, since the container check stays scoped to <c>"url"</c> alone.
-    /// </summary>
-    private static bool IsUrlSourcedService(IResource resource) =>
-        resource is ServiceResource
-        && resource.Annotations.OfType<ServiceSourceAnnotation>().Any(a => a.Source == "url");
 
     /// <summary>
     /// <paramref name="resource"/>'s source if it's an unregistered facade, else <see langword="null"/>.

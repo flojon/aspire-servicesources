@@ -16,6 +16,10 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// one that adds annotations afterwards, escapes it. Wrapping runs the original callback untouched and
 /// only then rewrites values referring to the facade, so other packages' values (and secrets) pass
 /// through. A throw inside a callback is a silent <c>FailedToStart</c>, so nothing here throws.
+/// <para>
+/// A connection string built from the facade's endpoint is replaced by its rewritten expression: DCP
+/// resolves the expression for the container network, where the facade has no address.
+/// </para>
 /// </remarks>
 internal static class UrlContainerReferenceRewrite
 {
@@ -155,6 +159,8 @@ internal static class UrlContainerReferenceRewrite
     {
         EndpointReference reference => facades.FirstOrDefault(f => ReferenceEquals(f, reference.Resource)),
         EndpointReferenceExpression property => FacadeOf(property.Endpoint, facades),
+        ConnectionStringReference connectionString => FacadeOf(connectionString.Resource, facades),
+        IResourceWithConnectionString resource => FacadeOf(resource.ConnectionStringExpression, facades),
         ReferenceExpression expression => expression.ValueProviders
                 .Select(provider => FacadeOf(provider, facades))
                 .FirstOrDefault(facade => facade is not null)
@@ -172,6 +178,8 @@ internal static class UrlContainerReferenceRewrite
             EndpointOf(property.Endpoint, facades), property.Property, out var text)
             ? text
             : throw new CannotRewriteException(),
+        ConnectionStringReference connectionString => RewriteValue(connectionString.Resource, facades),
+        IResourceWithConnectionString resource => RewriteValue(resource.ConnectionStringExpression, facades),
         ReferenceExpression { IsConditional: false } expression => RewriteExpression(expression, facades),
         _ => throw new CannotRewriteException(),
     };
