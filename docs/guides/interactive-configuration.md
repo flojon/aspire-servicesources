@@ -44,7 +44,10 @@ same message the next run would give, and nothing is saved for that service.
 
 Closing the dialog without saving changes nothing; the services stay unconfigured and the AppHost
 keeps running. Each unconfigured service also has a **Configure** command in the dashboard that
-raises the same dialog for that one service, if you dismissed it or want to answer later.
+raises the same dialog for that one service, if you dismissed it or want to answer later. The
+command succeeds only when the source is saved. Closing either dialog, or saving with no source
+chosen, cancels it, and a refused answer fails it with the reason in the dashboard's error toast and
+notification.
 
 ## Where the answer goes
 
@@ -89,9 +92,6 @@ overridden from `appsettings`, user secrets, environment variables or the comman
 
 ### Known limits
 
-- **Configure reports success when nothing was saved.** The command succeeds once the dialog has
-  run, including when you close it or the save is refused. The outcome is in the notification and
-  the log.
 - **The write lock is in-process only.** Two dialogs in one AppHost cannot interleave their writes,
   but another process, or an editor, saving the file at the same moment can lose a change.
 - **A `path` directory that comes from the catalog is not checked when you save.** A broken catalog

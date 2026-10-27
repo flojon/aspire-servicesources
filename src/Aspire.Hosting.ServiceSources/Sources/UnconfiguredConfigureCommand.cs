@@ -40,15 +40,21 @@ internal sealed class UnconfiguredConfigureCommand(
 
         try
         {
-            await UnconfiguredPrompt.RunAsync(services, [service], writer, appHostDirectory, logger, cancellationToken)
+            // The dashboard shows a failed command's message, so a "Source not saved" notification would repeat it.
+            var result = await UnconfiguredPrompt
+                .RunAsync(services, [service], writer, appHostDirectory, logger, cancellationToken, notifyNotSaved: false)
                 .ConfigureAwait(false);
-            return cancellationToken.IsCancellationRequested
-                ? Failure("The source dialog was cancelled.")
-                : new ExecuteCommandResult { Success = true };
+
+            if (result.Failed.Count > 0)
+            {
+                return CommandResults.Failure(result.NotSavedMessage.ToString());
+            }
+
+            return result.Saved.Count > 0 ? CommandResults.Success() : CommandResults.Canceled();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return Failure("The source dialog was cancelled.");
+            return CommandResults.Canceled();
         }
         catch (Exception ex)
         {
@@ -63,6 +69,5 @@ internal sealed class UnconfiguredConfigureCommand(
         }
     }
 
-    private static ExecuteCommandResult Failure(string message) =>
-        new() { Success = false, Message = message };
+    private static ExecuteCommandResult Failure(string message) => CommandResults.Failure(message);
 }

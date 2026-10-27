@@ -11,6 +11,15 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <summary>A declared service no configuration layer gave a source, as its placeholder recorded it.</summary>
 internal sealed record Unconfigured(string ServiceName, ServiceDefinition Definition);
 
+/// <summary>What one run of the source dialog saved and what it refused; both empty when nothing was answered.</summary>
+internal sealed record UnconfiguredPromptResult(IReadOnlyList<Raw> Saved, IReadOnlyList<Raw> Failed)
+{
+    public static readonly UnconfiguredPromptResult Nothing = new([], []);
+
+    /// <summary>The body of the "Source not saved" notification.</summary>
+    public Raw NotSavedMessage => Raw.Compose($"Not saved: {Raw.Join("; ", Failed)}");
+}
+
 /// <summary>
 /// Asks for a source for each unconfigured service, then saves the valid answers to
 /// <c>servicesources.local.json</c> for the next run.
@@ -59,19 +68,23 @@ internal static class UnconfiguredPrompt
     /// The whole flow: the dialog, a follow-up per answer that needs more, validation, the save and the
     /// notification. Only <paramref name="cancellationToken"/> or the host stopping ends the wait.
     /// </summary>
-    public static async Task RunAsync(
+    /// <param name="notifyNotSaved">
+    /// <see langword="false"/> when the caller reports the refusals itself, as a failed command result does.
+    /// </param>
+    public static async Task<UnconfiguredPromptResult> RunAsync(
         IServiceProvider services,
         IReadOnlyList<Unconfigured> unconfigured,
         IDeveloperConfigWriter writer,
         string appHostDirectory,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool notifyNotSaved = true)
     {
         var interaction = services.GetService<IInteractionService>();
         if (interaction is null || !interaction.IsAvailable)
         {
             WarnNotAsked(logger, unconfigured, Raw.Literal("there is no dashboard to ask in"));
-            return;
+            return UnconfiguredPromptResult.Nothing;
         }
 
         var stopping = services.GetService<IHostApplicationLifetime>()?.ApplicationStopping ?? CancellationToken.None;
@@ -89,12 +102,12 @@ internal static class UnconfiguredPrompt
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            return;
+            return UnconfiguredPromptResult.Nothing;
         }
 
         if (token.IsCancellationRequested)
         {
-            return;
+            return UnconfiguredPromptResult.Nothing;
         }
 
         if (result.Canceled || result.Data is not { } data)
@@ -103,7 +116,7 @@ internal static class UnconfiguredPrompt
                 logger,
                 $"The source dialog was closed, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. "
                 + $"{HowToConfigure}");
-            return;
+            return UnconfiguredPromptResult.Nothing;
         }
 
         var saved = new List<Raw>();
@@ -125,7 +138,7 @@ internal static class UnconfiguredPrompt
 
             if (token.IsCancellationRequested)
             {
-                return;
+                return UnconfiguredPromptResult.Nothing;
             }
 
             if (outcome is { Saved: true } ok)
@@ -147,10 +160,12 @@ internal static class UnconfiguredPrompt
             ServiceSourcesLog.Information(
                 logger,
                 $"{why}, so nothing was saved and {Names(unconfigured)} stay unconfigured this run. {HowToConfigure}");
-            return;
+            return UnconfiguredPromptResult.Nothing;
         }
 
-        Notify(interaction, saved, failed, logger, token);
+        var outcomes = new UnconfiguredPromptResult(saved, failed);
+        Notify(interaction, outcomes, notifyNotSaved, logger, token);
+        return outcomes;
     }
 
     private sealed record Outcome(bool Saved, Raw Line);
@@ -306,25 +321,24 @@ internal static class UnconfiguredPrompt
 
     // Raised, not awaited: a notification completes only when dismissed, and nothing here depends on that.
     private static void Notify(
-        IInteractionService interaction, List<Raw> saved, List<Raw> failed, ILogger logger, CancellationToken token)
+        IInteractionService interaction, UnconfiguredPromptResult result, bool notifyNotSaved, ILogger logger,
+        CancellationToken token)
     {
-        if (saved.Count > 0)
+        if (result.Saved.Count > 0)
         {
             Raise(
                 interaction,
                 "Source saved",
-                Raw.Compose($"Saved {Raw.Join("; ", saved)} to {Raw.Literal(DeveloperConfiguration.FileName)}. "
+                Raw.Compose($"Saved {Raw.Join("; ", result.Saved)} to {Raw.Literal(DeveloperConfiguration.FileName)}. "
                     + $"This run is unchanged; the choice takes effect the next time the AppHost starts."),
                 MessageIntent.Success,
                 logger,
                 token);
         }
 
-        if (failed.Count > 0)
+        if (result.Failed.Count > 0 && notifyNotSaved)
         {
-            Raise(
-                interaction, "Source not saved", Raw.Compose($"Not saved: {Raw.Join("; ", failed)}"),
-                MessageIntent.Error, logger, token);
+            Raise(interaction, "Source not saved", result.NotSavedMessage, MessageIntent.Error, logger, token);
         }
     }
 

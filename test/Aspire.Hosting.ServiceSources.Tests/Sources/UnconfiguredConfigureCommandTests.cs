@@ -17,15 +17,31 @@ public class UnconfiguredConfigureCommandTests
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
-    private static (IDistributedApplicationBuilder Builder, string Dir) Builder()
+    private const string CatalogWithUrl = """
+        services:
+          inventory:
+            url:
+              url: https://inventory.example.com
+        """;
+
+    // No URL, so choosing 'url' asks for one in the details dialog.
+    private const string CatalogWithoutUrl = """
+        services:
+          inventory:
+            container:
+              image: ghcr.io/company/inventory
+        """;
+
+    private static (IDistributedApplicationBuilder Builder, string Dir) Builder(
+        string catalog = CatalogWithUrl, string? localJson = null)
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
-        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
-            services:
-              inventory:
-                url:
-                  url: https://inventory.example.com
-            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), catalog);
+
+        if (localJson is not null)
+        {
+            File.WriteAllText(LocalJson(dir), localJson);
+        }
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -187,6 +203,102 @@ public class UnconfiguredConfigureCommandTests
 
         Assert.Null(SavedSource(dir));
         Assert.False(result.Success);
+        Assert.True(result.Canceled);
+    }
+
+    [Fact]
+    public async Task Configure_Command_Saved_ReportsSuccess_AndTheSavedNotification()
+    {
+        var (builder, dir) = Builder();
+        var interaction = Choosing("url");
+
+        var result = await Execute(Command(builder), Services(interaction)).WaitAsync(Patience);
+
+        Assert.True(result.Success);
+        Assert.Equal("url", SavedSource(dir));
+        Assert.Equal(MessageIntent.Success, Assert.Single(interaction.Notifications).Options?.Intent);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Configure_Command_DialogClosedOrNothingChosen_ReportsCanceled(string? choice)
+    {
+        var (builder, dir) = Builder();
+        var interaction = choice is null
+            ? new FakeInteractionService
+            {
+                IsAvailable = true,
+                Answer = _ => InteractionResult.Cancel<InteractionInputCollection>(),
+            }
+            : Choosing(choice);
+
+        var result = await Execute(Command(builder), Services(interaction)).WaitAsync(Patience);
+
+        Assert.False(result.Success);
+        Assert.True(result.Canceled);
+        Assert.Null(SavedSource(dir));
+        Assert.Empty(interaction.Notifications);
+    }
+
+    [Fact]
+    public async Task Configure_Command_DetailsDialogClosed_ReportsCanceled()
+    {
+        var (builder, dir) = Builder(CatalogWithoutUrl);
+        var interaction = Choosing("url");
+        interaction.Answer = _ => InteractionResult.Cancel<InteractionInputCollection>();
+
+        var result = await Execute(Command(builder), Services(interaction)).WaitAsync(Patience);
+
+        Assert.True(result.Canceled);
+        Assert.Equal(2, interaction.PromptCount);
+        Assert.Null(SavedSource(dir));
+    }
+
+    [Fact]
+    public async Task Configure_Command_AnswerRejected_ReportsFailure_InPlaceOfTheNotSavedNotification()
+    {
+        var (builder, dir) = Builder(CatalogWithoutUrl);
+        var interaction = new FakeInteractionService
+        {
+            IsAvailable = true,
+            AnswerFor = (title, inputs) =>
+            {
+                inputs[0].Value = title == UnconfiguredPrompt.Title ? "url" : "ftp://example.com";
+                return InteractionResult.Ok(new InteractionInputCollection(inputs));
+            },
+        };
+
+        var result = await Execute(Command(builder), Services(interaction)).WaitAsync(Patience);
+
+        Assert.False(result.Success);
+        Assert.False(result.Canceled);
+        Assert.StartsWith("Not saved: 'inventory':", result.Message);
+        Assert.Contains("must use the http or https scheme", result.Message);
+        Assert.Null(SavedSource(dir));
+        Assert.Empty(interaction.Notifications);
+    }
+
+    [Fact]
+    public async Task Configure_Command_SaveRefusedForComments_ReportsFailure_AndLeavesTheFile()
+    {
+        const string existing = """
+            {
+              // kept by hand
+              "services": {}
+            }
+            """;
+        var (builder, dir) = Builder(localJson: existing);
+        var interaction = Choosing("url");
+
+        var result = await Execute(Command(builder), Services(interaction)).WaitAsync(Patience);
+
+        Assert.False(result.Success);
+        Assert.False(result.Canceled);
+        Assert.StartsWith("Not saved: 'inventory':", result.Message);
+        Assert.Contains("contains comments, which saving would remove", result.Message);
+        Assert.Equal(existing, File.ReadAllText(LocalJson(dir)));
+        Assert.Empty(interaction.Notifications);
     }
 
     [Fact]
