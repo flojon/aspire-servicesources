@@ -31,7 +31,12 @@ never existed. Check the tag of the last release before adding one.
   (a default port is omitted; there is no path, query or credentials), in both the
   `INVENTORY_HTTPS` and `services__inventory__https__0` variables, and in any
   `WithEnvironment` or `WithArgs` value built from the service's endpoint. A loopback URL means the
-  container itself, because Aspire gives these containers no route to the host. Two forms are still
+  container itself, because Aspire gives these containers no route to the host. A value the
+  package cannot turn into a literal (a conditional expression over the service, an endpoint
+  property such as `TlsEnabled`, or a format specifier on its endpoint) stops the AppHost at
+  startup with an error naming the container, the variable or argument and the service. Finding
+  it runs the container's own `WithEnvironment`/`WithArgs` callbacks once at startup, ahead of
+  DCP, without resolving any value they return. Two forms are still
   not covered, and fail inside DCP as before: a container that consumes the service only through
   an opaque `WithEnvironment(context => ...)` callback, and one that reaches it through a
   connection string built from its endpoint.

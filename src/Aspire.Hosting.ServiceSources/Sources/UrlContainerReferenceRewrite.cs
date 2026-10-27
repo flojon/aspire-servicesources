@@ -15,7 +15,22 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// Runs from the guard's <c>BeforeStartEvent</c> handler, so a handler subscribed earlier, or a later
 /// one that adds annotations afterwards, escapes it. Wrapping runs the original callback untouched and
 /// only then rewrites values referring to the facade, so other packages' values (and secrets) pass
-/// through. A throw inside a callback is a silent <c>FailedToStart</c>, so nothing here throws.
+/// through.
+/// <para>
+/// A throw inside a callback DCP evaluates is a silent <c>FailedToStart</c>, so the wrappers never
+/// throw. A value that cannot be turned into a literal is instead found beforehand: the original
+/// callbacks are run once into a scratch context and what they produced is checked, so the
+/// refusal is raised from <c>BeforeStartEvent</c>, where it reaches the developer.
+/// </para>
+/// <para>
+/// The dry run only calls the callbacks the AppHost wrote, and resolves nothing itself: a value is
+/// inspected, never asked for its value, so a foreign provider (a parameter secret, a connection
+/// string) is not resolved by this package. A callback that resolves something on its own would have
+/// done so at real evaluation anyway. A callback that fails, or does not finish within a bounded
+/// time, during the dry run is skipped: it is the AppHost's own code and fails (or waits) the same
+/// way when DCP evaluates it, and a value it never produced cannot be checked, so what it would have
+/// added falls back to the log-and-leave path in the wrapper.
+/// </para>
 /// </remarks>
 internal static class UrlContainerReferenceRewrite
 {
@@ -26,8 +41,19 @@ internal static class UrlContainerReferenceRewrite
 
     private static readonly object Marker = new();
 
-    public static void Apply(ContainerResource consumer, IReadOnlyCollection<ServiceResource> facades, ILogger logger)
+    /// <summary>How long one callback may take during the dry run before it is given up on.</summary>
+    internal static readonly TimeSpan DefaultDryRunTimeout = TimeSpan.FromSeconds(5);
+
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// A value the consumer's callbacks produce refers to a facade in a form that has no literal.
+    /// </exception>
+    public static async Task ApplyAsync(
+        ContainerResource consumer, IReadOnlyCollection<ServiceResource> facades, ILogger logger,
+        IServiceProvider services, TimeSpan? dryRunTimeout = null)
     {
+        await RefuseWhatCannotBeRewrittenAsync(consumer, facades, services, dryRunTimeout ?? DefaultDryRunTimeout)
+            .ConfigureAwait(false);
+
         var shape = consumer.Annotations
             .Where(annotation => TargetsAFacade(annotation, facades))
             .ToArray();
@@ -67,6 +93,125 @@ internal static class UrlContainerReferenceRewrite
             });
 
             Replace(consumer, original, wrapper);
+        }
+    }
+
+    /// <summary>
+    /// Runs the callbacks not yet wrapped into scratch contexts, as DCP would, and throws for the first
+    /// value that refers to a facade in a form <see cref="RewriteValue"/> has no answer for.
+    /// </summary>
+    private static async Task RefuseWhatCannotBeRewrittenAsync(
+        ContainerResource consumer, IReadOnlyCollection<ServiceResource> facades, IServiceProvider services,
+        TimeSpan timeout)
+    {
+        var environmentCallbacks = consumer.Annotations.OfType<EnvironmentCallbackAnnotation>()
+            .Where(annotation => !Wrappers.TryGetValue(annotation, out _))
+            .ToArray();
+        var argsCallbacks = consumer.Annotations.OfType<CommandLineArgsCallbackAnnotation>()
+            .Where(annotation => !Wrappers.TryGetValue(annotation, out _))
+            .ToArray();
+
+        using var cancellation = new CancellationTokenSource();
+
+        if (environmentCallbacks.Length > 0)
+        {
+            var context = new EnvironmentCallbackContext(
+                new DistributedApplicationExecutionContext(new DistributedApplicationExecutionContextOptions(
+                    DistributedApplicationOperation.Run) { Services = services }),
+                consumer, cancellationToken: cancellation.Token);
+
+            if (await RunAsync(environmentCallbacks.Select(a => a.Callback(context)), timeout, cancellation)
+                    .ConfigureAwait(false))
+            {
+                var produced = context.EnvironmentVariables.ToArray();
+                Refuse(consumer, facades, produced.Select(entry => (entry.Key, entry.Value)));
+            }
+        }
+
+        if (argsCallbacks.Length > 0)
+        {
+            var context = new CommandLineArgsCallbackContext(
+                [], consumer, cancellationToken: cancellation.Token);
+
+            if (await RunAsync(argsCallbacks.Select(a => a.Callback(context)), timeout, cancellation)
+                    .ConfigureAwait(false))
+            {
+                var produced = context.Args.ToArray();
+                Refuse(consumer, facades, produced.Select((value, i) => ($"argument {i}", value)));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Awaits each callback in order, skipping one that throws. False if one outlived
+    /// <paramref name="timeout"/>: it may still be writing to the context, so nothing it holds is read.
+    /// </summary>
+    private static async Task<bool> RunAsync(
+        IEnumerable<Task> callbacks, TimeSpan timeout, CancellationTokenSource cancellation)
+    {
+        using var enumerator = callbacks.GetEnumerator();
+
+        while (true)
+        {
+            Task callback;
+
+            try
+            {
+                if (!enumerator.MoveNext())
+                {
+                    return true;
+                }
+
+                callback = enumerator.Current;
+            }
+            catch (Exception)
+            {
+                // A callback that throws before returning a task: the AppHost's own failure.
+                continue;
+            }
+
+            try
+            {
+                await callback.WaitAsync(timeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                await cancellation.CancelAsync().ConfigureAwait(false);
+                return false;
+            }
+            catch (Exception)
+            {
+                // The AppHost's own callback failed; it fails the same way when DCP runs it.
+            }
+        }
+    }
+
+    private static void Refuse(
+        ContainerResource consumer, IReadOnlyCollection<ServiceResource> facades,
+        IEnumerable<(string Key, object Value)> produced)
+    {
+        foreach (var (key, value) in produced)
+        {
+            if (FacadeOf(value, facades) is not { } facade)
+            {
+                continue;
+            }
+
+            try
+            {
+                _ = RewriteValue(value, facades);
+            }
+            catch (CannotRewriteException cannot)
+            {
+                // The URL is deliberately not in the message: only the consumer, the key and the service.
+                throw ServiceSourcesConfigurationException.For(
+                    $"Container '{Raw.Escaped(consumer.Name)}' uses service '{new Name(facade.Name)}', whose source is " +
+                    $"'url', in '{new Name(key)}', as {cannot.Reason}. A container is handed a 'url'-sourced " +
+                    $"service as a literal, and this form has none, so the container would fail to start without " +
+                    $"saying why. Use the endpoint itself, or one of its Url, Scheme, Host, Port, TargetPort or " +
+                    $"HostAndPort properties, in a plain interpolated expression instead, or " +
+                    $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+            }
         }
     }
 
@@ -134,6 +279,8 @@ internal static class UrlContainerReferenceRewrite
             catch (CannotRewriteException)
             {
                 // The URL is deliberately not in the message: only the key and the service name.
+                // Reached only for a value the dry run did not see (a callback that varies between runs, or
+                // one the dry run skipped), so it is left alone rather than thrown from a callback DCP runs.
                 ServiceSourcesLog.Warning(logger,
                     $"Container '{Raw.Escaped(consumer.Name)}' uses service '{new Name(facade.Name)}', whose source is 'url', " +
                     $"in '{new Name(key)}' in a form this package cannot turn into a literal, so it is left as " +
@@ -171,19 +318,21 @@ internal static class UrlContainerReferenceRewrite
         EndpointReferenceExpression property => UrlFacadeLiteral.TryProperty(
             EndpointOf(property.Endpoint, facades), property.Property, out var text)
             ? text
-            : throw new CannotRewriteException(),
+            : throw new CannotRewriteException(Raw.Compose(
+                $"the '{new Name(property.Property.ToString())}' endpoint property, which has no literal form")),
         ReferenceExpression { IsConditional: false } expression => RewriteExpression(expression, facades),
-        _ => throw new CannotRewriteException(),
+        ReferenceExpression => throw new CannotRewriteException(Raw.Literal("a conditional expression")),
+        _ => throw new CannotRewriteException(Raw.Literal("a value of a kind this package does not recognise")),
     };
 
     private static EndpointAnnotation EndpointOf(EndpointReference reference, IReadOnlyCollection<ServiceResource> facades)
     {
         var facade = facades.FirstOrDefault(f => ReferenceEquals(f, reference.Resource))
-            ?? throw new CannotRewriteException();
+            ?? throw new CannotRewriteException(Raw.Literal("an endpoint the service does not have"));
 
         return facade.Annotations.OfType<EndpointAnnotation>()
             .FirstOrDefault(e => string.Equals(e.Name, reference.EndpointName, StringComparison.OrdinalIgnoreCase))
-            ?? throw new CannotRewriteException();
+            ?? throw new CannotRewriteException(Raw.Literal("an endpoint the service does not have"));
     }
 
     /// <summary>
@@ -212,7 +361,7 @@ internal static class UrlContainerReferenceRewrite
                 if (end < 0 || !int.TryParse(format.AsSpan(i + 1, end - i - 1), out var index)
                     || index < 0 || index >= expression.ValueProviders.Count)
                 {
-                    throw new CannotRewriteException();
+                    throw new CannotRewriteException(Raw.Literal("an expression it cannot read"));
                 }
 
                 Flush(parts, literal);
@@ -225,7 +374,7 @@ internal static class UrlContainerReferenceRewrite
                 }
                 else if (!string.IsNullOrEmpty(stringFormat))
                 {
-                    throw new CannotRewriteException();
+                    throw new CannotRewriteException(Raw.Literal("a format specifier on the service's endpoint"));
                 }
                 else
                 {
@@ -273,5 +422,9 @@ internal static class UrlContainerReferenceRewrite
         }
     }
 
-    private sealed class CannotRewriteException : Exception;
+    private sealed class CannotRewriteException(Raw reason) : Exception
+    {
+        /// <summary>What the value is, as the tail of "...as {reason}".</summary>
+        public Raw Reason { get; } = reason;
+    }
 }
