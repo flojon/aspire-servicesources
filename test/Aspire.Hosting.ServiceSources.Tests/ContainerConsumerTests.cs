@@ -123,41 +123,34 @@ public class ContainerConsumerTests
     }
 
     [Fact]
-    public async Task UrlSourcedService_ReferencedByAContainer_FailsWithAServiceSourcesError()
+    public async Task UrlSourcedService_ReferencedByAContainer_DoesNotThrow()
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
 
         var inventory = builder.AddService("inventory");
-        builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
+        var storefront = builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
 
-        // Can't be fixed for 'url' (ExternalServiceResource is sealed), so the pre-flight replaces
-        // the DCP stack trace with something that names the cause.
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+        Assert.Null(await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder)));
 
-        Assert.Contains("storefront", ex.Message);
-        Assert.Contains("inventory", ex.Message);
-        Assert.Contains("'url'", ex.Message);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+        Assert.Equal("https://httpbin.org", env["INVENTORY_HTTPS"]);
     }
 
     [Fact]
-    public async Task UrlSourcedService_ConsumedByAContainerViaWithEnvironment_FailsWithAServiceSourcesError()
+    public async Task UrlSourcedService_ConsumedByAContainerViaWithEnvironment_DoesNotThrow()
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
 
         var inventory = builder.AddService("inventory");
         // The same consumption, expressed the other way Aspire allows. It leaves a different
-        // annotation behind than WithReference does, and DCP fails it identically — so the
-        // pre-flight has to recognise both or this route still surfaces the raw DCP trace.
-        builder.AddContainer("storefront", "nginx:alpine")
+        // annotation behind than WithReference does, so both shapes have to be recognised.
+        var storefront = builder.AddContainer("storefront", "nginx:alpine")
             .WithEnvironment("INVENTORY_URL", inventory.GetEndpoint("https"));
 
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+        Assert.Null(await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder)));
 
-        Assert.Contains("storefront", ex.Message);
-        Assert.Contains("inventory", ex.Message);
-        Assert.Contains("'url'", ex.Message);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+        Assert.Equal("https://httpbin.org", env["INVENTORY_URL"]);
     }
 
     [Fact]

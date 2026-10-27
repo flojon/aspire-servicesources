@@ -20,10 +20,8 @@ await builder.useInteractiveServiceConfiguration();
 // bind directly — no package-authored shim in front of them.
 //
 // servicesources.yaml also describes a "url" source for inventory, and flipping it there is a
-// one-line config edit that this file doesn't see. Don't do it for this sample, though: a
-// "url" service runs out of band with no resource for Aspire to run, so a *container* consumer
-// like payments can't reference it (#72) and the AppHost would refuse to start. A project or
-// executable consumer can.
+// one-line config edit that this file doesn't see. A "url" service runs out of band, so a *container* consumer
+// like payments is handed its address as a literal; a loopback URL would then mean the container itself.
 const inventory = await builder.addService('inventory');
 
 const payments = await builder
