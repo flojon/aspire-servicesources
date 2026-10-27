@@ -37,6 +37,19 @@ if (Environment.GetEnvironmentVariable("SERVICESOURCES_DEMO_URL_CONSUMER") is { 
         .WithEntrypoint("sleep")
         .WithArgs("3600")
         .WithReference(inventory);
+
+    // The two forms with no annotation naming the service: an opaque callback and a connection string.
+    builder.AddContainer("urlcallback", consumerImage)
+        .WithEntrypoint("sleep")
+        .WithArgs("3600")
+        .WithEnvironment(context => context.EnvironmentVariables["INVENTORY_URL"] = inventory.GetEndpoint("https"));
+
+    var inventoryConnection = builder.AddConnectionString(
+        "inventorycs", ReferenceExpression.Create($"Endpoint={inventory.GetEndpoint("https")};Key=x"));
+    builder.AddContainer("urlconnstr", consumerImage)
+        .WithEntrypoint("sleep")
+        .WithArgs("3600")
+        .WithReference(inventoryConnection);
 }
 
 // "container" source: runs a published container image locally via Aspire's own

@@ -9,10 +9,28 @@ Three consequences follow from the service running out of band. The AppHost's
 that `WithReference`s it is handed the URL as a literal, `scheme://host[:port]` with a default port
 omitted and no path, query or credentials, because there is no resource for Aspire to route
 container-to-host traffic through. A loopback URL such as `http://localhost:8765` therefore means
-the container itself, since Aspire gives these containers no route to the host. A container that reaches the service some other way (an opaque
-`WithEnvironment(context => ...)` callback alone, or a connection string built from its endpoint) is
-not rewritten and fails inside DCP. And a
-consumer's `WaitFor` on it resolves immediately instead of waiting:
+the container itself, since Aspire gives these containers no route to the host. The same literal
+replaces the service's endpoint wherever a container's environment or arguments carry it: a
+`WithEnvironment` or `WithArgs` value, one set inside an opaque `WithEnvironment(context => ...)`
+callback, and a connection string built from the endpoint:
+
+```csharp
+var inventory = builder.AddService("inventory");
+var connection = builder.AddConnectionString(
+    "inventorycs", ReferenceExpression.Create($"Endpoint={inventory.GetEndpoint("https")};Key=x"));
+
+builder.AddContainer("worker", "alpine")
+    .WithReference(connection);   // ConnectionStrings__inventorycs=Endpoint=https://...;Key=x
+```
+
+Other values in the same connection string, such as a secret parameter, are passed through as
+Aspire resolves them. A value the rewrite cannot turn into a literal, such as a conditional
+expression over the endpoint, is logged as a warning naming the container, the variable and the
+service, and the container may fail to start; pass the endpoint or its `Url` property directly instead.
+A callback that a library adds to the container after this package's `BeforeStartEvent` handler has
+run is not rewritten.
+
+And a consumer's `WaitFor` on it resolves immediately instead of waiting:
 
 ```csharp
 var orders = builder.AddService("orders");
