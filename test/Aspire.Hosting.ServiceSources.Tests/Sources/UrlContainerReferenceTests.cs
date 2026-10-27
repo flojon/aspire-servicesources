@@ -237,40 +237,142 @@ public class UrlContainerReferenceTests
     }
 
     [Fact]
-    public async Task AValueTheRewriteCannotHandle_IsLoggedAndLeftInPlace()
+    public async Task AnEndpointPropertyWithNoLiteralForm_FailsFastAtStartup()
     {
         var (builder, inventory, storefront) = Arrange();
-        var log = TestHelpers.CaptureServiceSourcesLog(builder);
         var endpoint = inventory.GetEndpoint("https");
         storefront
             .WithReference(inventory)
             .WithEnvironment("T", endpoint.Property(EndpointProperty.TlsEnabled));
 
-        await TestHelpers.PublishBeforeStartEventAsync(builder);
-        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+        var error = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
 
-        Assert.IsType<EndpointReferenceExpression>(env["T"]);
-        var warning = Assert.Single(log, entry => entry.Level == LogLevel.Warning).Message;
-        Assert.Contains("storefront", warning);
-        Assert.Contains("'T'", warning);
-        Assert.Contains("inventory", warning);
-        Assert.DoesNotContain("httpbin", warning);
+        Assert.Contains("storefront", error.Message);
+        Assert.Contains("'T'", error.Message);
+        Assert.Contains("inventory", error.Message);
+        Assert.Contains("TlsEnabled", error.Message);
+        Assert.DoesNotContain("httpbin", error.Message);
     }
 
     [Fact]
-    public async Task ARewriteFailure_DoesNotThrowFromTheCallback()
+    public async Task AConditionalExpressionOverTheFacade_FailsFastAtStartup()
     {
         var (builder, inventory, storefront) = Arrange();
-        storefront.WithReference(inventory);
-        // A conditional expression over the facade cannot be rebuilt; the callback must still complete.
         var endpoint = inventory.GetEndpoint("https");
-        storefront.WithEnvironment("COND", ReferenceExpression.CreateConditional(
-            endpoint.Property(EndpointProperty.Url), "x", ReferenceExpression.Create($"a"), ReferenceExpression.Create($"b")));
+        storefront
+            .WithReference(inventory)
+            .WithEnvironment("COND", ReferenceExpression.CreateConditional(
+                endpoint.Property(EndpointProperty.Url), "x", ReferenceExpression.Create($"a"), ReferenceExpression.Create($"b")));
+
+        var error = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("storefront", error.Message);
+        Assert.Contains("'COND'", error.Message);
+        Assert.Contains("inventory", error.Message);
+        Assert.Contains("conditional", error.Message);
+        Assert.DoesNotContain("httpbin", error.Message);
+    }
+
+    [Fact]
+    public async Task AFormatSpecifierOnTheFacade_FailsFastAtStartup()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var endpoint = inventory.GetEndpoint("https");
+        var builderExpression = new ReferenceExpressionBuilder();
+        builderExpression.AppendLiteral("u=");
+        builderExpression.AppendValueProvider(endpoint, "uri");
+        storefront.WithReference(inventory).WithEnvironment("F", builderExpression.Build());
+
+        var error = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("'F'", error.Message);
+        Assert.Contains("format specifier", error.Message);
+        Assert.DoesNotContain("httpbin", error.Message);
+    }
+
+    [Fact]
+    public async Task AnArgumentTheRewriteCannotHandle_FailsFastAtStartup()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var endpoint = inventory.GetEndpoint("https");
+        storefront
+            .WithReference(inventory)
+            .WithArgs(context => context.Args.Add(endpoint.Property(EndpointProperty.TlsEnabled)));
+
+        var error = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("storefront", error.Message);
+        Assert.Contains("argument 0", error.Message);
+        Assert.DoesNotContain("httpbin", error.Message);
+    }
+
+    [Fact]
+    public async Task TheFailFastError_OffersTheWayOut()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        storefront
+            .WithReference(inventory)
+            .WithEnvironment("T", inventory.GetEndpoint("https").Property(EndpointProperty.TlsEnabled));
+
+        var error = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("servicesources.local.json", error.Message);
+    }
+
+    [Fact]
+    public async Task TheDryRun_NeverResolvesAForeignProvider()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var foreign = new CountingProvider();
+        storefront.WithReference(inventory).WithEnvironment("F", ReferenceExpression.Create($"{foreign}"));
 
         await TestHelpers.PublishBeforeStartEventAsync(builder);
 
-        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
-        Assert.IsType<ReferenceExpression>(env["COND"]);
+        Assert.Equal(0, foreign.Resolutions);
+    }
+
+    [Fact]
+    public async Task ACallbackThatThrowsDuringTheDryRun_DoesNotFailThePreflight()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        storefront
+            .WithReference(inventory)
+            .WithEnvironment(_ => throw new InvalidOperationException("not ready yet"));
+
+        // The callback fails at real evaluation too; the pre-flight only has to stay out of its way.
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+
+    }
+
+    [Fact]
+    public async Task AFacadeFreeConditionalExpression_IsNotRefused()
+    {
+        var (builder, inventory, storefront) = Arrange();
+        var secret = builder.AddParameter("api-key", "s3cret", secret: true);
+        storefront
+            .WithReference(inventory)
+            .WithEnvironment("COND", ReferenceExpression.CreateConditional(
+                ReferenceExpression.Create($"{secret.Resource}"), "x", ReferenceExpression.Create($"a"), ReferenceExpression.Create($"b")));
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+    }
+
+    private sealed class CountingProvider : IValueProvider, IManifestExpressionProvider
+    {
+        public int Resolutions;
+
+        public string ValueExpression => "{counting.value}";
+
+        public ValueTask<string?> GetValueAsync(CancellationToken cancellationToken = default)
+        {
+            Resolutions++;
+            return new ValueTask<string?>("v");
+        }
     }
 
     [Fact]

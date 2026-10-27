@@ -56,7 +56,7 @@ internal static class UnregisteredServiceStartupGuard
 
     private static void Subscribe(IDistributedApplicationBuilder builder)
     {
-        builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
+        builder.Eventing.Subscribe<BeforeStartEvent>(async (@event, _) =>
         {
             var logger = (ILogger?)@event.Services.GetService<ILoggerFactory>()?.CreateLogger("Aspire.Hosting.ServiceSources")
                 ?? NullLogger.Instance;
@@ -67,7 +67,8 @@ internal static class UnregisteredServiceStartupGuard
 
                 if (urlServices.Count > 0)
                 {
-                    UrlContainerReferenceRewrite.Apply(consumer, urlServices, logger);
+                    await UrlContainerReferenceRewrite.ApplyAsync(consumer, urlServices, logger, @event.Services)
+                        .ConfigureAwait(false);
                 }
             }
 
@@ -78,8 +79,6 @@ internal static class UnregisteredServiceStartupGuard
             // Flushed here since these skips are recorded *during* BeforeStartEvent — the warnings
             // class's own flush handler may have already run, or may not exist yet.
             warnings.Flush(@event.Services);
-
-            return Task.CompletedTask;
         });
 
         // Created eagerly, after the subscription above, so a dropped wait lands in the same grouped

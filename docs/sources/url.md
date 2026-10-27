@@ -9,7 +9,7 @@ Three consequences follow from the service running out of band. The AppHost's
 that `WithReference`s it is handed the URL as a literal, `scheme://host[:port]` with a default port
 omitted and no path, query or credentials, because there is no resource for Aspire to route
 container-to-host traffic through. A loopback URL such as `http://localhost:8765` therefore means
-the container itself, since Aspire gives these containers no route to the host. A container that reaches the service some other way (an opaque
+the container itself, since Aspire gives these containers no route to the host. A value the package cannot turn into a literal (a conditional expression over the service, an endpoint property with no literal form such as `TlsEnabled`, or a format specifier on its endpoint) stops the AppHost at startup with an error naming the container, the variable or argument and the service; use the endpoint or one of its `Url`, `Scheme`, `Host`, `Port`, `TargetPort` or `HostAndPort` properties instead. To find these the package runs the container's own `WithEnvironment`/`WithArgs` callbacks once at startup, ahead of DCP, and only looks at what they return: it resolves no parameter or connection string, and a callback that throws or runs past five seconds in that early run is skipped, not reported. A container that reaches the service some other way (an opaque
 `WithEnvironment(context => ...)` callback alone, or a connection string built from its endpoint) is
 not rewritten and fails inside DCP. And a
 consumer's `WaitFor` on it resolves immediately instead of waiting:
