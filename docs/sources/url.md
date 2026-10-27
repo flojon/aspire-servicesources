@@ -24,11 +24,17 @@ builder.AddContainer("worker", "alpine")
 ```
 
 Other values in the same connection string, such as a secret parameter, are passed through as
-Aspire resolves them. A value the rewrite cannot turn into a literal, such as a conditional
-expression over the endpoint, is logged as a warning naming the container, the variable and the
-service, and the container may fail to start; pass the endpoint or its `Url` property directly instead.
-A callback that a library adds to the container after this package's `BeforeStartEvent` handler has
-run is not rewritten.
+Aspire resolves them. A value the rewrite cannot turn into a literal (a conditional expression over
+the service, an endpoint property with no literal form such as `TlsEnabled`, or a format specifier on
+its endpoint) stops the AppHost at startup with an error naming the container, the variable or
+argument and the service; use the endpoint or one of its `Url`, `Scheme`, `Host`, `Port`,
+`TargetPort` or `HostAndPort` properties instead. To find these the package runs the container's own
+`WithEnvironment`/`WithArgs` callbacks once at startup, ahead of DCP, and only looks at what they
+return: it resolves no parameter or connection string, and a callback that throws or runs past five
+seconds in that early run is skipped, not reported. A value only visible when DCP evaluates the
+callback, or a callback that a library adds to the container after this package's `BeforeStartEvent`
+handler has run, is not checked: the first is logged as a warning naming the container, the variable
+and the service, and the container may fail to start; the second is not rewritten.
 
 And a consumer's `WaitFor` on it resolves immediately instead of waiting:
 

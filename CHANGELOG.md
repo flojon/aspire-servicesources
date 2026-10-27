@@ -48,7 +48,12 @@ never existed. Check the tag of the last release before adding one.
   inside an opaque `WithEnvironment(context => ...)` or `WithArgs(context => ...)` callback. A
   connection string built from the service's endpoint (`AddConnectionString(...)` then
   `WithReference`) reaches the container with the URL rewritten the same way. A loopback URL means
-  the container itself, because Aspire gives these containers no route to the host.
+  the container itself, because Aspire gives these containers no route to the host. A value the
+  package cannot turn into a literal (a conditional expression over the service, an endpoint
+  property such as `TlsEnabled`, or a format specifier on its endpoint) stops the AppHost at
+  startup with an error naming the container, the variable or argument and the service. Finding
+  it runs the container's own `WithEnvironment`/`WithArgs` callbacks once at startup, ahead of
+  DCP, without resolving any value they return.
 
 ### Changed
 
