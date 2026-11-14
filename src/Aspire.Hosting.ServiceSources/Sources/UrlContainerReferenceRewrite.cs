@@ -27,7 +27,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// refusal is raised from <c>BeforeStartEvent</c>, where it reaches the developer.
 /// </para>
 /// <para>
-/// The dry run only calls the callbacks the AppHost wrote, and resolves nothing itself: a value is
+/// The dry run is limited to containers the AppHost pointed at a facade, and only calls the
+/// callbacks the AppHost wrote (so they run once more than DCP alone would run them). It resolves nothing itself: a value is
 /// inspected, never asked for its value, so a foreign provider (a parameter secret, a connection
 /// string) is not resolved by this package. A callback that resolves something on its own would have
 /// done so at real evaluation anyway. A callback that fails, or does not finish within a bounded
@@ -55,8 +56,16 @@ internal static class UrlContainerReferenceRewrite
         ContainerResource consumer, IReadOnlyCollection<ServiceResource> facades, ILogger logger,
         IServiceProvider services, TimeSpan? dryRunTimeout = null)
     {
-        await RefuseWhatCannotBeRewrittenAsync(consumer, facades, services, dryRunTimeout ?? DefaultDryRunTimeout)
-            .ConfigureAwait(false);
+        // Only a container the AppHost pointed at a facade (WithReference, WaitFor, an endpoint reference)
+        // is dry-run. Since the wrappers cover every container, running everyone's callbacks would repeat
+        // their side effects and spend the timeout on containers that have nothing to do with a url
+        // service. A container that reaches the service only inside an opaque callback is still
+        // rewritten, but an unrewritable value there is logged by the wrapper, not refused up front.
+        if (consumer.Annotations.Any(annotation => TargetsAFacade(annotation, facades)))
+        {
+            await RefuseWhatCannotBeRewrittenAsync(consumer, facades, services, dryRunTimeout ?? DefaultDryRunTimeout)
+                .ConfigureAwait(false);
+        }
 
         var shape = consumer.Annotations
             .Where(annotation => TargetsAFacade(annotation, facades))
@@ -115,16 +124,18 @@ internal static class UrlContainerReferenceRewrite
             .Where(annotation => !Wrappers.TryGetValue(annotation, out _))
             .ToArray();
 
-        using var cancellation = new CancellationTokenSource();
+        var executionContext = new DistributedApplicationExecutionContext(
+            new DistributedApplicationExecutionContextOptions(DistributedApplicationOperation.Run) { Services = services });
 
         if (environmentCallbacks.Length > 0)
         {
-            var context = new EnvironmentCallbackContext(
-                new DistributedApplicationExecutionContext(new DistributedApplicationExecutionContextOptions(
-                    DistributedApplicationOperation.Run) { Services = services }),
-                consumer, cancellationToken: cancellation.Token);
+            // One token per kind: a timeout in one must not hand the other an already-cancelled token. Not
+            // disposed, because an abandoned callback may still hold it; with no timer or linked source
+            // there is nothing for a disposal to release.
+            var cancellation = new CancellationTokenSource();
+            var context = new EnvironmentCallbackContext(executionContext, consumer, cancellationToken: cancellation.Token);
 
-            if (await RunAsync(environmentCallbacks.Select(a => a.Callback(context)), timeout, cancellation)
+            if (await RunAsync(environmentCallbacks.Select(a => (Func<Task>)(() => a.Callback(context))), timeout, cancellation)
                     .ConfigureAwait(false))
             {
                 var produced = context.EnvironmentVariables.ToArray();
@@ -134,10 +145,15 @@ internal static class UrlContainerReferenceRewrite
 
         if (argsCallbacks.Length > 0)
         {
-            var context = new CommandLineArgsCallbackContext(
-                [], consumer, cancellationToken: cancellation.Token);
+            var cancellation = new CancellationTokenSource();
+            var context = new CommandLineArgsCallbackContext([], consumer, cancellationToken: cancellation.Token)
+            {
+                // Without this the default context throws for a callback that reads Services, and that
+                // callback's arguments would be skipped for a reason of ours.
+                ExecutionContext = executionContext,
+            };
 
-            if (await RunAsync(argsCallbacks.Select(a => a.Callback(context)), timeout, cancellation)
+            if (await RunAsync(argsCallbacks.Select(a => (Func<Task>)(() => a.Callback(context))), timeout, cancellation)
                     .ConfigureAwait(false))
             {
                 var produced = context.Args.ToArray();
@@ -151,32 +167,15 @@ internal static class UrlContainerReferenceRewrite
     /// <paramref name="timeout"/>: it may still be writing to the context, so nothing it holds is read.
     /// </summary>
     private static async Task<bool> RunAsync(
-        IEnumerable<Task> callbacks, TimeSpan timeout, CancellationTokenSource cancellation)
+        IEnumerable<Func<Task>> callbacks, TimeSpan timeout, CancellationTokenSource cancellation)
     {
-        using var enumerator = callbacks.GetEnumerator();
-
-        while (true)
+        foreach (var callback in callbacks)
         {
-            Task callback;
-
             try
             {
-                if (!enumerator.MoveNext())
-                {
-                    return true;
-                }
-
-                callback = enumerator.Current;
-            }
-            catch (Exception)
-            {
-                // A callback that throws before returning a task: the AppHost's own failure.
-                continue;
-            }
-
-            try
-            {
-                await callback.WaitAsync(timeout).ConfigureAwait(false);
+                // Started on the pool, not called here: a callback that blocks before its first await
+                // would otherwise hold this thread, and the timeout below would never be reached.
+                await Task.Run(callback).WaitAsync(timeout).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -188,6 +187,8 @@ internal static class UrlContainerReferenceRewrite
                 // The AppHost's own callback failed; it fails the same way when DCP runs it.
             }
         }
+
+        return true;
     }
 
     private static void Refuse(

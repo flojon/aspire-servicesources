@@ -52,8 +52,9 @@ never existed. Check the tag of the last release before adding one.
   package cannot turn into a literal (a conditional expression over the service, an endpoint
   property such as `TlsEnabled`, or a format specifier on its endpoint) stops the AppHost at
   startup with an error naming the container, the variable or argument and the service. Finding
-  it runs the container's own `WithEnvironment`/`WithArgs` callbacks once at startup, ahead of
-  DCP, without resolving any value they return.
+  it runs the `WithEnvironment`/`WithArgs` callbacks of each container that references the service
+  once at startup, ahead of DCP, without resolving any value they return; they run again when DCP
+  evaluates them.
 
 ### Changed
 

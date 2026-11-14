@@ -269,6 +269,18 @@ public class UrlContainerReferenceTests
     }
 
     [Fact]
+    public async Task TheDryRun_DoesNotRunTheCallbacksOfAContainerThatHoldsNoReferenceToTheService()
+    {
+        var (builder, _, _) = Arrange();
+        var runs = 0;
+        builder.AddContainer("redis", "redis:7").WithEnvironment(_ => Interlocked.Increment(ref runs));
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+
+        Assert.Equal(0, runs);
+    }
+
+    [Fact]
     public async Task AContainerThatDoesNotUseTheService_KeepsItsValues()
     {
         var (builder, _, storefront) = Arrange();

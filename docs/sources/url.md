@@ -28,13 +28,18 @@ Aspire resolves them. A value the rewrite cannot turn into a literal (a conditio
 the service, an endpoint property with no literal form such as `TlsEnabled`, or a format specifier on
 its endpoint) stops the AppHost at startup with an error naming the container, the variable or
 argument and the service; use the endpoint or one of its `Url`, `Scheme`, `Host`, `Port`,
-`TargetPort` or `HostAndPort` properties instead. To find these the package runs the container's own
-`WithEnvironment`/`WithArgs` callbacks once at startup, ahead of DCP, and only looks at what they
-return: it resolves no parameter or connection string, and a callback that throws or runs past five
-seconds in that early run is skipped, not reported. A value only visible when DCP evaluates the
+`TargetPort` or `HostAndPort` properties instead. To find these the package runs the callbacks of each container
+that references the service (`WithReference`, `WaitFor` or an endpoint reference) once at startup,
+ahead of DCP, and only looks at what they return. Those callbacks therefore run twice, once here and
+once when DCP evaluates them, so a callback with a side effect sees the extra early call; containers
+that do not reference the service are not run early. The early run resolves no parameter or
+connection string, and a callback that throws, or that has not finished after five seconds (including
+one that blocks before its first `await`), is skipped, not reported. A value only visible when DCP
+evaluates the callback, a value in a container that reaches the service only inside an opaque
 callback, or a callback that a library adds to the container after this package's `BeforeStartEvent`
-handler has run, is not checked: the first is logged as a warning naming the container, the variable
-and the service, and the container may fail to start; the second is not rewritten.
+handler has run, is not checked up front: an unrewritable value in the first two is logged as a
+warning naming the container, the variable and the service, and the container may fail to start; the
+third is not rewritten.
 
 And a consumer's `WaitFor` on it resolves immediately instead of waiting:
 
