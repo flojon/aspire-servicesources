@@ -3,6 +3,8 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 using Aspire.Hosting.ServiceSources.Messages;
+using Aspire.Hosting.ServiceSources.BackingServices;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -35,8 +37,35 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
             // able to ask for it under that name (#160). See EndpointScheme.
             .WithEndpoint(port: localPort, targetPort: localPort, scheme: scheme, name: scheme, isProxied: false);
 
+        // What makes a consumer's WaitFor mean anything (#490). Aspire counts an executable as
+        // Running once its process has started, which for kubectl is before it has resolved the
+        // Service or opened the tunnel, so without this a consumer starts against a port nothing is
+        // listening on — and, for a Service name that does not exist, against one nothing ever will.
+        // A TCP connect is the same question the backing-service source asks, for the same reason
+        // (see LocalPortHealthCheck): it asks whether the tunnel is up, not what is behind it.
+        //
+        // Added before the bridge so the facade copies it with the rest, and on the real resource
+        // alone for the monitor loop's sake: only that one is ever registered, so only it is probed.
+        var healthCheckKey = HealthCheckKey(serviceName);
+
+        builder.Services
+            .AddHealthChecks()
+            .AddCheck(
+                healthCheckKey,
+                new LocalPortHealthCheck(serviceName, localPort, subject: "Service"),
+                timeout: KubectlPortForward.ProbeTimeout);
+
+        executableBuilder.WithHealthCheck(healthCheckKey);
+
+        // And what happens to the tunnel afterwards: an exit before it was up is a failed start, an
+        // exit after it was up is restarted with a backoff. See PortForwardSupervisor.
+        PortForwardSupervisor.Install(builder, executableBuilder.Resource, serviceName);
+
         return ResolvedService.Bridge(executableBuilder, serviceName, "kubernetes");
     }
+
+    /// <summary>The key the tunnel's TCP health check is registered under.</summary>
+    internal static string HealthCheckKey(string serviceName) => $"{serviceName}-port-forward-tcp";
 
     public Type? DeclaredResourceType(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>

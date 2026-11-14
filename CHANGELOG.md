@@ -65,6 +65,28 @@ never existed. Check the tag of the last release before adding one.
   `kubernetes:` entry with no `kubernetes.context` is not offered. The `path` remedy and the list of
   configuration layers that can set `source` are unchanged.
 
+- **A `"kubernetes"` tunnel that exits after it was up is restarted, with a backoff** ([#490]). Before,
+  a pod restart, a rollout or a dropped connection ended the `kubectl port-forward` for good and
+  everything referencing the service lost it for the rest of the run. Now the same resource is started
+  again after 1s, 2s, 4s … (at most 30s between attempts), logging each attempt, and left stopped with
+  an error line after 8 restarts in a row; coming back up resets the count. A tunnel that never came up,
+  one the developer stopped, and one that Aspire could not launch are not restarted. Consumers see
+  the same local port again but any connection open through the old tunnel is gone, so they must
+  reconnect. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
+
+### Fixed
+
+- **A `"kubernetes"` service no longer counts as ready before its port-forward works, and one that
+  fails to open is reported as failed** ([#490]). The service was `Running` as soon as the `kubectl`
+  process had started, so a consumer's `WaitFor` released it before kubectl had resolved the Service or
+  opened the tunnel: against a Service name that does not exist, the consumer started and failed to
+  connect while the tunnel's own resource finished with exit code 1. The service now carries a built-in
+  health check that connects to the tunnel's local port, so `WaitFor` holds until the tunnel accepts
+  connections. A port-forward that exits before that point is marked `FailedToStart` (with kubectl's last
+  line in the AppHost log), so a `WaitFor` dependent fails with that reason instead of starting against a
+  dead endpoint. The probe is a plain TCP connect, which kubectl logs as `Handling connection for <port>`
+  in the service's console. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking
@@ -2161,3 +2183,4 @@ Targets `net10.0`.
 [#481]: https://github.com/flojon/aspire-servicesources/issues/481
 [#486]: https://github.com/flojon/aspire-servicesources/issues/486
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
+[#490]: https://github.com/flojon/aspire-servicesources/issues/490

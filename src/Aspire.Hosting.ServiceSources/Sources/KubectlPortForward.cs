@@ -23,6 +23,18 @@ internal static class KubectlPortForward
     public const string DefaultNamespace = "default";
 
     /// <summary>
+    /// How long one probe of the tunnel's local port may take before it counts as a failure.
+    /// </summary>
+    /// <remarks>
+    /// Set explicitly because <c>AddCheck</c>'s instance overload leaves the registration's timeout
+    /// infinite, and a connect that <em>hangs</em> rather than refuses would then stall that
+    /// resource's monitor loop for the life of the run — no result, and so no report to act on.
+    /// Loopback makes that nearly impossible, which is the reason to spend one argument on it
+    /// rather than a mechanism: the failure it forecloses is cheap to prevent and silent to hit.
+    /// </remarks>
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// The arguments that forward <paramref name="localPort"/> to <paramref name="remotePort"/> on
     /// the Service <paramref name="service"/>.
     /// </summary>

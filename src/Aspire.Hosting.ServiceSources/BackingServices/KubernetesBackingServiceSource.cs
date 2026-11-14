@@ -237,17 +237,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     private static string HealthCheckKey(string name, string? portName) =>
         portName is null ? $"{name}-tunnel-tcp" : $"{name}-tunnel-tcp-{portName}";
 
-    /// <summary>
-    /// How long one probe may take before it counts as a failure.
-    /// </summary>
-    /// <remarks>
-    /// Set explicitly because <c>AddCheck</c>'s instance overload leaves the registration's timeout
-    /// infinite, and a connect that <em>hangs</em> rather than refuses would then stall that
-    /// resource's monitor loop for the life of the run — no result, and so no report to act on.
-    /// Loopback makes that nearly impossible, which is the reason to spend one argument on it
-    /// rather than a mechanism: the failure it forecloses is cheap to prevent and silent to hit.
-    /// </remarks>
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ProbeTimeout = KubectlPortForward.ProbeTimeout;
 
     /// <summary>
     /// Refuses a template this source cannot resolve, and one that never mentions the tunnel.
