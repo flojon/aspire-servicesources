@@ -159,18 +159,17 @@ public class SkipRemedyTests
     public async Task AServiceNameShapedLikeASecondEntry_DoesNotForgeOneThroughAContainerReference()
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
-        var log = TestHelpers.CaptureServiceSourcesLog(builder);
         var service = new UrlSource().Resolve(
             builder, HostileName, UrlOnly, new ServiceDeveloperConfig { Source = "url" });
-        // TlsEnabled has no literal, which is what makes the rewrite name the service in a warning.
+        // TlsEnabled has no literal, which is what makes the rewrite name the service in its refusal.
         builder.AddContainer("storefront", "nginx:alpine")
             .WithReference(service)
             .WithEnvironment("TLS", service.GetEndpoint("https").Property(EndpointProperty.TlsEnabled));
 
-        await TestHelpers.PublishBeforeStartEventAsync(builder);
-        await CallbackRunner.EnvironmentAsync(builder.Resources.OfType<ContainerResource>().Single());
+        var error = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
 
-        AssertNoForgedEntry(Assert.Single(log, entry => entry.Level == LogLevel.Warning).Message);
+        AssertNoForgedEntry(error.Message);
     }
 
     [Fact]
