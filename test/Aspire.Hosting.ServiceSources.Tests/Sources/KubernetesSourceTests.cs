@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
+[Trait("IO", "true")]
 public class KubernetesSourceTests
 {
     private sealed class FakePortAllocator(int port) : IPortAllocator

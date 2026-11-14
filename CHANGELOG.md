@@ -69,7 +69,9 @@ never existed. Check the tag of the last release before adding one.
   a pod restart, a rollout or a dropped connection ended the `kubectl port-forward` for good and
   everything referencing the service lost it for the rest of the run. Now the same resource is started
   again after 1s, 2s, 4s … (at most 30s between attempts), logging each attempt, and left stopped with
-  an error line after 8 restarts in a row; coming back up resets the count. A tunnel that never came up,
+  an error line after 8 restarts in a row; a tunnel that then stays up for 30s resets the count, and
+  starting the resource yourself after it gave up does too. Starting it while a restart is waiting
+  cancels that restart. A tunnel that never came up,
   one the developer stopped, and one that Aspire could not launch are not restarted. Consumers see
   the same local port again but any connection open through the old tunnel is gone, so they must
   reconnect. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
@@ -2181,6 +2183,6 @@ Targets `net10.0`.
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
 [#481]: https://github.com/flojon/aspire-servicesources/issues/481
+[#490]: https://github.com/flojon/aspire-servicesources/issues/490
 [#486]: https://github.com/flojon/aspire-servicesources/issues/486
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
-[#490]: https://github.com/flojon/aspire-servicesources/issues/490

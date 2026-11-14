@@ -72,15 +72,28 @@ internal sealed class PortForwardSupervisor(
     /// <summary>The longest wait between two restart attempts.</summary>
     internal static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How long a tunnel has to stay healthy before an outage after it counts as a fresh one. A
+    /// health report cannot be told from a stale one left by the previous process, so a single
+    /// healthy snapshot is not proof that the restart worked.
+    /// </summary>
+    internal static readonly TimeSpan StableUptime = TimeSpan.FromSeconds(30);
+
     private const string LogCategory = "Aspire.Hosting.ServiceSources";
 
     private static readonly ConditionalWeakTable<IResource, object> Installed = new();
+
+    private readonly object _gate = new();
 
     // The tunnel's own state, kept between snapshots. One instance: the resource is never replicated.
     private bool _ready;
     private bool _stopRequested;
     private bool _ended;
+    private bool _gaveUp;
     private int _restarts;
+    private DateTimeOffset? _healthySince;
+    private CancellationTokenSource? _pendingRestart;
+    private Task _restartTask = Task.CompletedTask;
 
     /// <summary>The wait before restart attempt <paramref name="attempt"/> (1-based): 1s, 2s, 4s … capped.</summary>
     internal static TimeSpan Backoff(int attempt) =>
@@ -173,6 +186,11 @@ internal sealed class PortForwardSupervisor(
         {
             // The host is shutting down: nothing left to supervise.
         }
+        finally
+        {
+            CancelPendingRestart();
+            await _restartTask.ConfigureAwait(false);
+        }
     }
 
     private async Task OnSnapshotAsync(CustomResourceSnapshot snapshot, CancellationToken cancellationToken)
@@ -185,21 +203,36 @@ internal sealed class PortForwardSupervisor(
 
         if (Is(state, KnownResourceStates.Starting) || Is(state, KnownResourceStates.NotStarted))
         {
+            // The supervisor's own restart has returned by now, so one still waiting out its backoff
+            // was overtaken by the developer starting the resource.
+            CancelPendingRestart();
+
             _ready = false;
             _stopRequested = false;
             _ended = false;
+            _healthySince = null;
+
+            lock (_gate)
+            {
+                // A start after the supervisor gave up is the developer's: it gets a full allowance.
+                if (_gaveUp)
+                {
+                    _gaveUp = false;
+                    _restarts = 0;
+                }
+            }
         }
         else if (Is(state, KnownResourceStates.Running))
         {
+            CancelPendingRestart();
             _ended = false;
 
             // A report has to be there to read: Aspire calls a Running resource with no checks Healthy,
             // and "Running" is exactly what this class exists to not take for "the tunnel is up".
             if (snapshot.HealthReports.Length > 0 && snapshot.HealthStatus == HealthStatus.Healthy)
             {
-                // Up. Whatever outage came before is over, so the next one gets the full allowance.
                 _ready = true;
-                _restarts = 0;
+                _healthySince ??= timeProvider.GetUtcNow();
             }
         }
         else if (Is(state, KnownResourceStates.Stopping))
@@ -224,15 +257,40 @@ internal sealed class PortForwardSupervisor(
                 return;
             }
 
-            if (!_ready && _restarts == 0)
+            bool firstFailure;
+
+            lock (_gate)
+            {
+                // A fresh outage is one that follows a tunnel that held, not one that reported healthy once.
+                if (_healthySince is { } since && timeProvider.GetUtcNow() - since >= StableUptime)
+                {
+                    _restarts = 0;
+                }
+
+                firstFailure = !_ready && _restarts == 0;
+            }
+
+            if (firstFailure)
             {
                 await FailedBeforeReadyAsync(snapshot.ExitCode, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            await RestartAsync(snapshot.ExitCode, _ready, cancellationToken).ConfigureAwait(false);
+            var wasReady = _ready;
+            var exitCode = snapshot.ExitCode;
+
+            CancelPendingRestart();
+            await _restartTask.ConfigureAwait(false);
+
+            // Off the snapshot loop, so that a Running or Starting snapshot arriving during the
+            // backoff is still read, and overrules the restart.
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _pendingRestart = cts;
+            _restartTask = Task.Run(() => RestartAsync(exitCode, wasReady, cts.Token), CancellationToken.None);
         }
     }
+
+    private void CancelPendingRestart() => Interlocked.Exchange(ref _pendingRestart, null)?.Cancel();
 
     private async Task FailedBeforeReadyAsync(int? exitCode, CancellationToken cancellationToken)
     {
@@ -250,44 +308,65 @@ internal sealed class PortForwardSupervisor(
 
     private async Task RestartAsync(int? exitCode, bool wasReady, CancellationToken cancellationToken)
     {
-        var said = await KubectlSaidAsync(cancellationToken).ConfigureAwait(false);
-        var why = wasReady
-            ? Raw.Compose($"exited{ExitCode(exitCode)} after it had been up")
-            : Raw.Compose($"exited{ExitCode(exitCode)} again before it was up");
-
-        while (true)
+        try
         {
-            if (_restarts >= MaxRestarts)
+            var said = await KubectlSaidAsync(cancellationToken).ConfigureAwait(false);
+            var why = wasReady
+                ? Raw.Compose($"exited{ExitCode(exitCode)} after it had been up")
+                : Raw.Compose($"exited{ExitCode(exitCode)} again before it was up");
+
+            while (true)
             {
-                ServiceSourcesLog.Error(
+                int attempt;
+
+                lock (_gate)
+                {
+                    if (_restarts >= MaxRestarts)
+                    {
+                        _gaveUp = true;
+                        attempt = 0;
+                    }
+                    else
+                    {
+                        attempt = ++_restarts;
+                    }
+                }
+
+                if (attempt == 0)
+                {
+                    ServiceSourcesLog.Error(
+                        logger,
+                        $"Service '{new Name(serviceName)}': the kubectl port-forward {why} and {MaxRestarts} restarts in a row "
+                        + $"did not bring it back, so it is left stopped. {said}Everything referencing this service has lost "
+                        + $"it; once the cluster is reachable again, start the resource from the dashboard.");
+                    return;
+                }
+
+                var delay = Backoff(attempt);
+
+                ServiceSourcesLog.Warning(
                     logger,
-                    $"Service '{new Name(serviceName)}': the kubectl port-forward {why} and {MaxRestarts} restarts in a row "
-                    + $"did not bring it back, so it is left stopped. {said}Everything referencing this service has lost "
-                    + $"it; once the cluster is reachable again, start the resource from the dashboard.");
-                return;
+                    $"Service '{new Name(serviceName)}': the kubectl port-forward {why}. {said}Restarting it in "
+                    + $"{(int)delay.TotalSeconds}s (attempt {attempt} of {MaxRestarts}).");
+
+                await Task.Delay(delay, timeProvider, cancellationToken).ConfigureAwait(false);
+
+                var failure = await control.StartAsync(cancellationToken).ConfigureAwait(false);
+
+                if (failure is null)
+                {
+                    // Requested. What the new process does is for the snapshots that follow to say.
+                    return;
+                }
+
+                ServiceSourcesLog.Warning(
+                    logger,
+                    $"Service '{new Name(serviceName)}': restarting the kubectl port-forward was refused: {Raw.Output(failure)}");
             }
-
-            _restarts++;
-            var delay = Backoff(_restarts);
-
-            ServiceSourcesLog.Warning(
-                logger,
-                $"Service '{new Name(serviceName)}': the kubectl port-forward {why}. {said}Restarting it in "
-                + $"{(int)delay.TotalSeconds}s (attempt {_restarts} of {MaxRestarts}).");
-
-            await Task.Delay(delay, timeProvider, cancellationToken).ConfigureAwait(false);
-
-            var failure = await control.StartAsync(cancellationToken).ConfigureAwait(false);
-
-            if (failure is null)
-            {
-                // Requested. What the new process does is for the snapshots that follow to say.
-                return;
-            }
-
-            ServiceSourcesLog.Warning(
-                logger,
-                $"Service '{new Name(serviceName)}': restarting the kubectl port-forward was refused: {Raw.Output(failure)}");
+        }
+        catch (OperationCanceledException)
+        {
+            // Overruled by a Running or Starting snapshot, or the host is shutting down.
         }
     }
 

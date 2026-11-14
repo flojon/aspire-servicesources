@@ -89,7 +89,9 @@ because the process started. Three things follow from that.
 TCP connection to the local port the tunnel forwards. A consumer that `WaitFor`s the service starts
 once that connection is accepted, whether or not the AppHost adds a health check of its own. The probe
 repeats while the service runs, and `kubectl` logs each one as `Handling connection for <port>` in the
-service's console; that is the probe, not traffic.
+service's console; that is the probe, not traffic. The probe opens and closes a connection without
+sending anything, so the pod behind the tunnel may see an empty connection each interval and a
+database may log it as an aborted or EOF connection.
 
 **A tunnel that fails to open is `FailedToStart`.** A Service name that does not exist in the
 namespace, a context that cannot authenticate, or a port the Service does not expose makes `kubectl`
@@ -104,7 +106,9 @@ replaced, a rollout happens or the connection drops, `kubectl port-forward` exit
 started again, so it keeps its name and its local port, after a wait of 1s, 2s, 4s and so on, never
 more than 30s. Each attempt is logged as a warning naming the attempt (`attempt 3 of 8`). After 8
 restarts in a row the tunnel is left stopped and an error is logged; start the resource from the
-dashboard once the cluster is reachable. A tunnel that comes back up resets the count.
+dashboard once the cluster is reachable. A tunnel that stays up for 30s resets the count, and so does
+starting the resource yourself after it gave up. Starting it while a restart is waiting cancels that
+restart.
 
 This is deliberately modest:
 

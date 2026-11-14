@@ -89,7 +89,36 @@ public class PortForwardSupervisorTests
         public Harness(TimeSpan? settle = null)
         {
             _running = new PortForwardSupervisor("orders", Logger, Control, Time, settle ?? TimeSpan.Zero)
-                .SuperviseAsync(_events.Reader.ReadAllAsync(), CancellationToken.None);
+                .SuperviseAsync(Counted(), CancellationToken.None);
+        }
+
+        private int _published;
+        private int _handled;
+
+        /// <summary>Counts a snapshot as handled once the supervisor asks for the next one.</summary>
+        private async IAsyncEnumerable<ResourceEvent> Counted()
+        {
+            await foreach (var published in _events.Reader.ReadAllAsync())
+            {
+                yield return published;
+                Interlocked.Increment(ref _handled);
+            }
+        }
+
+        /// <summary>Waits until every snapshot published so far has been fully handled.</summary>
+        public async Task IdleAsync()
+        {
+            var deadline = DateTime.UtcNow + Patience;
+
+            while (Volatile.Read(ref _handled) < Volatile.Read(ref _published))
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException("The supervisor never caught up with the snapshots.");
+                }
+
+                await Task.Delay(1);
+            }
         }
 
         public FakeControl Control { get; } = new();
@@ -113,6 +142,7 @@ public class PortForwardSupervisorTests
                 snapshot = snapshot.WithHealthReports([new HealthReportSnapshot("tcp", status, null, null)]);
             }
 
+            Interlocked.Increment(ref _published);
             _events.Writer.TryWrite(new ResourceEvent(_resource, "orders-abc", snapshot));
         }
 
@@ -122,6 +152,43 @@ public class PortForwardSupervisorTests
             Publish(KnownResourceStates.Starting);
             Publish(KnownResourceStates.Running);
             Publish(KnownResourceStates.Running, health: HealthStatus.Healthy);
+        }
+
+        /// <summary>
+        /// Advances the clock once the supervisor is waiting on it. Advancing earlier would move the
+        /// clock before the timer exists, and the wait would then start from the new time.
+        /// </summary>
+        public async Task AdvanceAsync(TimeSpan by)
+        {
+            var deadline = DateTime.UtcNow + Patience;
+
+            while (Time.PendingTimers == 0)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException("The supervisor never started waiting on the clock.");
+                }
+
+                await Task.Delay(1);
+            }
+
+            Time.Advance(by);
+        }
+
+        /// <summary>Waits until the supervisor has dropped the restart it was waiting to make.</summary>
+        public async Task WaitForPendingRestartToEndAsync()
+        {
+            var deadline = DateTime.UtcNow + Patience;
+
+            while (Time.PendingTimers > 0)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException("The restart was never cancelled.");
+                }
+
+                await Task.Delay(1);
+            }
         }
 
         /// <summary>Ends the stream and waits for the supervisor to finish what it was doing.</summary>
@@ -178,10 +245,10 @@ public class PortForwardSupervisorTests
         Assert.Contains("after it had been up", text);
         Assert.Contains("in 1s (attempt 1 of 8)", text);
 
-        harness.Time.Advance(TimeSpan.FromMilliseconds(900));
+        await harness.AdvanceAsync(TimeSpan.FromMilliseconds(900));
         Assert.Equal(0, harness.Control.Starts);
 
-        harness.Time.Advance(TimeSpan.FromMilliseconds(200));
+        await harness.AdvanceAsync(TimeSpan.FromMilliseconds(200));
         await harness.Control.NextStartAsync();
         await harness.FinishAsync();
 
@@ -195,7 +262,7 @@ public class PortForwardSupervisorTests
         harness.BringUp();
         harness.Publish(KnownResourceStates.Finished, exitCode: 1);
         await harness.Logger.NextAsync();
-        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
         await harness.Control.NextStartAsync();
 
         // The new process starts and dies without ever being healthy.
@@ -204,7 +271,7 @@ public class PortForwardSupervisorTests
         harness.Publish(KnownResourceStates.Finished, exitCode: 1);
 
         var (_, text) = await harness.Logger.NextAsync();
-        harness.Time.Advance(TimeSpan.FromSeconds(2));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(2));
         await harness.Control.NextStartAsync();
         await harness.FinishAsync();
 
@@ -220,18 +287,92 @@ public class PortForwardSupervisorTests
         harness.BringUp();
         harness.Publish(KnownResourceStates.Finished, exitCode: 1);
         await harness.Logger.NextAsync();
-        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+
+        harness.BringUp();
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.StableUptime);
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        var (_, text) = await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+        await harness.FinishAsync();
+
+        Assert.Contains("in 1s (attempt 1 of 8)", text);
+    }
+
+    [Fact]
+    public async Task ATunnelThatReportsHealthyAndDiesAtOnce_DoesNotGetTheAllowanceBack()
+    {
+        // A health report left over from the previous process looks the same as a real one.
+        var harness = new Harness();
+        harness.BringUp();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+        await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
         await harness.Control.NextStartAsync();
 
         harness.BringUp();
         harness.Publish(KnownResourceStates.Finished, exitCode: 1);
 
         var (_, text) = await harness.Logger.NextAsync();
-        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(2));
         await harness.Control.NextStartAsync();
         await harness.FinishAsync();
 
-        Assert.Contains("in 1s (attempt 1 of 8)", text);
+        Assert.Contains("in 2s (attempt 2 of 8)", text);
+    }
+
+    [Fact]
+    public async Task AStartDuringTheBackoff_CancelsTheRestart_AndDoesNotRunTheCounterOut()
+    {
+        var harness = new Harness();
+        harness.Control.StartAnswer = "already running";
+        harness.BringUp();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+        await harness.Logger.NextAsync();
+
+        harness.BringUp();
+        await harness.WaitForPendingRestartToEndAsync();
+
+        harness.Time.Advance(PortForwardSupervisor.MaxBackoff);
+        await harness.FinishAsync();
+
+        Assert.Equal(0, harness.Control.Starts);
+        Assert.Single(harness.Logger.Written);
+    }
+
+    [Fact]
+    public async Task AStartAfterTheSupervisorGaveUp_GetsAFullAllowance()
+    {
+        var harness = new Harness();
+        harness.Control.StartAnswer = "refused";
+        harness.BringUp();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        for (var attempt = 1; attempt <= PortForwardSupervisor.MaxRestarts; attempt++)
+        {
+            await harness.Logger.NextAsync();
+            await harness.AdvanceAsync(PortForwardSupervisor.MaxBackoff);
+            await harness.Control.NextStartAsync();
+            await harness.Logger.NextAsync();
+        }
+
+        var (giveUp, _) = await harness.Logger.NextAsync();
+        Assert.Equal(LogLevel.Error, giveUp);
+
+        // The developer starts it, and it dies before it is healthy: a failed start, not "8 in a row".
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        var (_, text) = await harness.Logger.NextAsync();
+        await harness.FinishAsync();
+
+        Assert.Contains("FailedToStart", text);
+        Assert.Single(harness.Control.Failed);
     }
 
     [Fact]
@@ -244,7 +385,7 @@ public class PortForwardSupervisorTests
         harness.Publish(KnownResourceStates.Finished, exitCode: 1);
 
         await harness.Logger.NextAsync();
-        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
         await harness.Control.NextStartAsync();
         await harness.FinishAsync();
 
@@ -294,7 +435,7 @@ public class PortForwardSupervisorTests
         for (var attempt = 1; attempt <= PortForwardSupervisor.MaxRestarts; attempt++)
         {
             await harness.Logger.NextAsync();
-            harness.Time.Advance(PortForwardSupervisor.MaxBackoff);
+            await harness.AdvanceAsync(PortForwardSupervisor.MaxBackoff);
             await harness.Control.NextStartAsync();
             last = await harness.Logger.NextAsync();
             Assert.Contains("refused", last.Text);
