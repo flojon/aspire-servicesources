@@ -37,9 +37,13 @@ public class PortForwardSupervisorTests
 
         public string? LastOutput { get; set; }
 
+        /// <summary>Runs while a start request is in flight, as Aspire's own snapshots do.</summary>
+        public Action? WhileStarting { get; set; }
+
         public Task<string?> StartAsync(CancellationToken cancellationToken)
         {
             Starts++;
+            WhileStarting?.Invoke();
             _starts.Writer.TryWrite(Starts);
             return Task.FromResult(StartAnswer);
         }
@@ -373,6 +377,30 @@ public class PortForwardSupervisorTests
 
         Assert.Contains("FailedToStart", text);
         Assert.Single(harness.Control.Failed);
+    }
+
+    [Fact]
+    public async Task TheSupervisorsOwnStart_ShowingUpAsStarting_DoesNotCancelItsOwnRetries()
+    {
+        var harness = new Harness();
+        harness.Control.StartAnswer = "refused";
+        harness.Control.WhileStarting = () => harness.Publish(KnownResourceStates.Starting);
+        harness.BringUp();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+        await harness.Logger.NextAsync();
+
+        // The refused attempt is followed by the next one, not by silence.
+        var (_, text) = await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(2));
+        await harness.Control.NextStartAsync();
+        await harness.FinishAsync();
+
+        Assert.Contains("attempt 2 of 8", text);
+        Assert.Equal(2, harness.Control.Starts);
     }
 
     [Fact]

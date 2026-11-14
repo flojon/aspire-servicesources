@@ -203,10 +203,8 @@ internal sealed class PortForwardSupervisor(
 
         if (Is(state, KnownResourceStates.Starting) || Is(state, KnownResourceStates.NotStarted))
         {
-            // The supervisor's own restart has returned by now, so one still waiting out its backoff
-            // was overtaken by the developer starting the resource.
-            CancelPendingRestart();
-
+            // Not a reason to cancel a pending restart: the supervisor's own Start produces this
+            // snapshot too, often before the Start call has returned.
             _ready = false;
             _stopRequested = false;
             _ended = false;
@@ -286,7 +284,7 @@ internal sealed class PortForwardSupervisor(
             // backoff is still read, and overrules the restart.
             var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _pendingRestart = cts;
-            _restartTask = Task.Run(() => RestartAsync(exitCode, wasReady, cts.Token), CancellationToken.None);
+            _restartTask = Task.Run(() => RestartAsync(exitCode, wasReady, cts.Token, cancellationToken), CancellationToken.None);
         }
     }
 
@@ -306,7 +304,8 @@ internal sealed class PortForwardSupervisor(
         await control.FailToStartAsync(control.LastOutput, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task RestartAsync(int? exitCode, bool wasReady, CancellationToken cancellationToken)
+    private async Task RestartAsync(
+        int? exitCode, bool wasReady, CancellationToken cancellationToken, CancellationToken hostStopping)
     {
         try
         {
@@ -351,7 +350,9 @@ internal sealed class PortForwardSupervisor(
 
                 await Task.Delay(delay, timeProvider, cancellationToken).ConfigureAwait(false);
 
-                var failure = await control.StartAsync(cancellationToken).ConfigureAwait(false);
+                // Only the host stopping may abort the call: cancelling a Start midway leaves the resource in
+                // Starting with no process.
+                var failure = await control.StartAsync(hostStopping).ConfigureAwait(false);
 
                 if (failure is null)
                 {
