@@ -1,8 +1,8 @@
 # Aspire.Hosting.ServiceSources — Interactive Source Picker for Unconfigured Services
 
 **Date:** 2026-08-28
-**Status:** Implemented. Reconciled with main on 2026-10-18 (see *Since this was
-written*).
+**Status:** Implemented in two parts, #471 (opt-in and placeholder) and #495 (dialog, persistence
+and the `Configure` command). Reconciled with main on 2026-11-14 (see *Since this was written*).
 **Complements:** GitHub issue #70 (per-service "Change source" command), which covers services
 that already resolved. This design covers the case #70 does not reach — a service with no source
 at all — and reuses #70's dialog machinery to do it.
@@ -34,6 +34,16 @@ and described `CI` and `SERVICESOURCES_INTERACTIVE` as new when #428 already own
   (2026-10-18); the "two config files read directly" description it started from no longer holds.
 - **`UseDeferredCheckout()` and `UseJava()` are now obsolete no-ops**, so the opt-in family named
   below is not a family to join.
+- **Shipped in #471 and #495.** The startup dialog is raised from `BeforeStartEvent` on a task nobody
+  awaits, offers each service only the sources its catalog entry supports (`IServiceSource.IsOfferedFor`),
+  asks a follow-up for `kubernetes`, `path` and `url` when a field is missing, and validates the answer
+  with the same helpers `Resolve` uses before merging it into `servicesources.local.json`. A file with
+  comments or malformed JSON is refused and left byte-identical. The `Configure` command runs the same
+  flow per service. One dialog is open per service at a time: a startup dialog and a `Configure` click
+  cannot both ask about, and write, the same service.
+- **Known upstream bug.** On Aspire 13.6.x a prompt opened while the AppHost is busy starting can crash
+  the dashboard (microsoft/aspire#21102). It is documented under *Known limits* in
+  `docs/guides/interactive-configuration.md`.
 
 ## Motivation
 
@@ -495,3 +505,13 @@ exist and raises none when they do not.
   tractable at all: a checkout that runs before `Build()` has nowhere to report to, since the CLI
   never renders AppHost console output, while one that runs after the dashboard is up can publish
   real resource state. Nothing here needs to solve it.
+
+### Tracked follow-ups
+
+- #508 — a dashboard command to restart the AppHost after saving (the stop-the-AppHost item above).
+- #509 — whether `GetServiceEndpoint()` and `Unwrap<T>()` should tolerate a placeholder.
+- #510 — evaluating the speculative explicit-start project (*Option not taken*).
+- #504 — each source owning its picker follow-up fields and validation, instead of the copies in
+  `SourceFollowUp` and `PickerAnswers`.
+- #506 — config writer and dialog polish (non-blocking retry, a less lossy rewrite, scratch-file
+  cleanup, `Raw.Display` for dialog text).
