@@ -154,22 +154,55 @@ internal static class UrlContainerReferenceRewrite
         }
     }
 
-    /// <summary>The facade <paramref name="value"/> refers to (searching nested expressions), or null.</summary>
-    private static ServiceResource? FacadeOf(object? value, IReadOnlyCollection<ServiceResource> facades) => value switch
+    /// <summary>
+    /// How deep <see cref="FacadeOf"/> follows nested expressions. Real connection strings nest a few
+    /// levels; a resource whose expression refers back to itself would otherwise recurse until the process
+    /// dies, and this search runs over every container's values, not only those that use a url service.
+    /// </summary>
+    private const int MaxSearchDepth = 32;
+
+    /// <summary>
+    /// The facade <paramref name="value"/> refers to (searching nested expressions), or null. Null as well
+    /// when it cannot tell: a value that belongs to no url service is none of this package's business, so a
+    /// foreign resource whose expression throws, or nests too deeply, is left alone and not reported.
+    /// </summary>
+    private static ServiceResource? FacadeOf(object? value, IReadOnlyCollection<ServiceResource> facades, int depth = 0)
     {
-        EndpointReference reference => facades.FirstOrDefault(f => ReferenceEquals(f, reference.Resource)),
-        EndpointReferenceExpression property => FacadeOf(property.Endpoint, facades),
-        ConnectionStringReference connectionString => FacadeOf(connectionString.Resource, facades),
-        IResourceWithConnectionString resource => FacadeOf(resource.ConnectionStringExpression, facades),
-        ReferenceExpression expression => expression.ValueProviders
-                .Select(provider => FacadeOf(provider, facades))
-                .FirstOrDefault(facade => facade is not null)
-            ?? FacadeOf(expression.Condition, facades)
-            ?? (expression.IsConditional
-                ? FacadeOf(expression.WhenTrue, facades) ?? FacadeOf(expression.WhenFalse, facades)
-                : null),
-        _ => null,
-    };
+        if (depth > MaxSearchDepth)
+        {
+            return null;
+        }
+
+        var next = depth + 1;
+
+        return value switch
+        {
+            EndpointReference reference => facades.FirstOrDefault(f => ReferenceEquals(f, reference.Resource)),
+            EndpointReferenceExpression property => FacadeOf(property.Endpoint, facades, next),
+            ConnectionStringReference connectionString => FacadeOf(connectionString.Resource, facades, next),
+            IResourceWithConnectionString resource => FacadeOf(ExpressionOf(resource), facades, next),
+            ReferenceExpression expression => expression.ValueProviders
+                    .Select(provider => FacadeOf(provider, facades, next))
+                    .FirstOrDefault(facade => facade is not null)
+                ?? FacadeOf(expression.Condition, facades, next)
+                ?? (expression.IsConditional
+                    ? FacadeOf(expression.WhenTrue, facades, next) ?? FacadeOf(expression.WhenFalse, facades, next)
+                    : null),
+            _ => null,
+        };
+    }
+
+    private static ReferenceExpression? ExpressionOf(IResourceWithConnectionString resource)
+    {
+        try
+        {
+            return resource.ConnectionStringExpression;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
 
     private static object RewriteValue(object value, IReadOnlyCollection<ServiceResource> facades) => value switch
     {

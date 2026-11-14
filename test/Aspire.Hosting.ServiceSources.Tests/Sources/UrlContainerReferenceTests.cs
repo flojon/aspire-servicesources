@@ -284,6 +284,60 @@ public class UrlContainerReferenceTests
     }
 
     [Fact]
+    public async Task AForeignConnectionStringWhoseExpressionThrows_InAnUnrelatedContainer_IsLeftAloneQuietly()
+    {
+        var (builder, _, storefront) = Arrange();
+        var log = TestHelpers.CaptureServiceSourcesLog(builder);
+        var foreign = new ThrowingConnectionStringResource("foreign");
+        storefront.WithEnvironment(context => context.EnvironmentVariables["FOREIGN"] = foreign);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        Assert.Same(foreign, env["FOREIGN"]);
+        Assert.DoesNotContain(log, entry => entry.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task AConnectionStringThatReferencesItself_DoesNotRecurseForever()
+    {
+        var (builder, _, storefront) = Arrange();
+        var cyclic = new SelfReferencingConnectionStringResource("cyclic");
+        storefront.WithEnvironment(context => context.EnvironmentVariables["CYCLIC"] = cyclic);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var env = await CallbackRunner.EnvironmentAsync(storefront.Resource);
+
+        Assert.Same(cyclic, env["CYCLIC"]);
+    }
+
+    [Fact]
+    public async Task AUrlServiceInOneBuilder_DoesNotRewriteAnotherBuildersContainers()
+    {
+        var (withUrl, _, _) = Arrange();
+        var (other, otherInventory, otherStorefront) = Arrange("container");
+        otherStorefront.WithEnvironment("OWN", otherInventory.GetEndpoint("https"));
+        var before = otherStorefront.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().ToArray();
+
+        await TestHelpers.PublishBeforeStartEventAsync(withUrl);
+
+        Assert.Equal(before, otherStorefront.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+        await TestHelpers.PublishBeforeStartEventAsync(other);
+        Assert.Equal(before, otherStorefront.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+    }
+
+    private sealed class ThrowingConnectionStringResource(string name) : Resource(name), IResourceWithConnectionString
+    {
+        public ReferenceExpression ConnectionStringExpression =>
+            throw new InvalidOperationException("this resource has no connection string yet");
+    }
+
+    private sealed class SelfReferencingConnectionStringResource(string name) : Resource(name), IResourceWithConnectionString
+    {
+        public ReferenceExpression ConnectionStringExpression => ReferenceExpression.Create($"Server={this}");
+    }
+
+    [Fact]
     public async Task RunningThePreflightTwice_LeavesOneWrapperPerCallback()
     {
         var (builder, inventory, storefront) = Arrange();
