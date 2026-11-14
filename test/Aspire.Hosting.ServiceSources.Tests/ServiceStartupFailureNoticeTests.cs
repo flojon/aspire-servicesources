@@ -268,6 +268,26 @@ public class ServiceStartupFailureNoticeTests
     }
 
     [Fact]
+    public async Task AKubernetesTunnelThatNeverLaunched_IsToldToCheckThatKubectlIsInstalled()
+    {
+        var launched = Assert.Single(await ReportAsync(
+            ServiceResource(source: "kubernetes"), Snapshot(KnownResourceStates.FailedToStart)));
+
+        // Aspire's own verdict carries no exit code; one the supervisor published after the process
+        // ran carries kubectl's, and has a log line of its own.
+        var ran = Assert.Single(await ReportAsync(
+            ServiceResource(source: "kubernetes"), Snapshot(KnownResourceStates.FailedToStart, exitCode: 1)));
+
+        var other = Assert.Single(await ReportAsync(
+            ServiceResource(source: "container"), Snapshot(KnownResourceStates.FailedToStart)));
+
+        Assert.Contains("kubectl could not be launched", launched);
+        Assert.Contains("on the PATH", launched);
+        Assert.DoesNotContain("kubectl", ran);
+        Assert.DoesNotContain("kubectl", other);
+    }
+
+    [Fact]
     public async Task OneFailingReplicaAmongHealthyOnes_IsReportedOnceAndDoesNotRepeat()
     {
         // Replicas share one IResource and are told apart only by their id, and their snapshots

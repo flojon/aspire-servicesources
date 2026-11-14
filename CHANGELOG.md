@@ -90,6 +90,10 @@ never existed. Check the tag of the last release before adding one.
   dead endpoint (Aspire holds it; it does not fail it). The probe is a plain TCP connect, which kubectl logs as `Handling connection for <port>`
   in the service's console. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
 
+- **The startup-failure notice for a `"kubernetes"` service that never launched now says why it
+  usually happens** ([#490]). When Aspire reports `FailedToStart` with no exit code, the AppHost log
+  adds that `kubectl` could not be launched and to check that it is installed and on the `PATH`.
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking

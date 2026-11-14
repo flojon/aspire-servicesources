@@ -513,9 +513,17 @@ internal sealed class ServiceStartupFailureNotices
               $"is reported nowhere else at all.")
             : Raw.Literal("");
 
+        // FailedToStart with no exit code means Aspire never got a process to run. For a tunnel
+        // that is nearly always kubectl missing from PATH, and the output that would say so is in
+        // the resource's console rather than here. A tunnel that failed after launching carries the
+        // exit code, and the supervisor logs its own account of it.
+        var launch = source is "kubernetes" && exitCode is null && Is(state, KnownResourceStates.FailedToStart)
+            ? Raw.Literal(" For a 'kubernetes' service that usually means kubectl could not be launched: check that it is installed and on the PATH.")
+            : Raw.Literal("");
+
         return Raw.Compose(
             $"Service '{new Name(serviceName)}' is configured as '{new Name(source)}' and {resource} is not running: it "
             + $"reported {reported}. This console does not carry that resource's output, so nothing here "
-            + $"says why — {elsewhere}.{checkout}");
+            + $"says why — {elsewhere}.{checkout}{launch}");
     }
 }
