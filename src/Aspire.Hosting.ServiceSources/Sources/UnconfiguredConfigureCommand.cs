@@ -45,6 +45,11 @@ internal sealed class UnconfiguredConfigureCommand(
                 .RunAsync(services, [service], writer, appHostDirectory, logger, cancellationToken, notifyNotSaved: false)
                 .ConfigureAwait(false);
 
+            if (result.AlreadyOpen)
+            {
+                return Failure($"The source dialog for '{service.ServiceName}' is already open.");
+            }
+
             if (result.Failed.Count > 0)
             {
                 return CommandResults.Failure(result.NotSavedMessage.ToString());

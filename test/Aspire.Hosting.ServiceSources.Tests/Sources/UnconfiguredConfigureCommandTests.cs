@@ -329,6 +329,30 @@ public class UnconfiguredConfigureCommandTests
     }
 
     [Fact]
+    public async Task Configure_Command_WhileTheStartupDialogIsOpen_IsRefused_AndNothingIsWritten()
+    {
+        var (builder, dir) = Builder();
+        var startup = new FakeInteractionService { IsAvailable = true };
+        var other = Choosing("url");
+        using var cts = new CancellationTokenSource();
+
+        var first = UnconfiguredPrompt.RunAsync(
+            Services(startup), UnconfiguredRegistry.For(builder).Services,
+            UnconfiguredRegistry.CreateWriter(dir), dir, new ListLogger(), cts.Token);
+        await startup.Prompted.WaitAsync(Patience);
+
+        var click = await Execute(Command(builder), Services(other)).WaitAsync(Patience);
+
+        Assert.False(click.Success);
+        Assert.Contains("already open", click.Message);
+        Assert.Equal(0, other.PromptCount);
+        Assert.False(File.Exists(LocalJson(dir)));
+
+        await cts.CancelAsync();
+        await first.WaitAsync(Patience);
+    }
+
+    [Fact]
     public async Task DialogClosedLine_PointsAtTheConfigureCommand_AndTheConfigKey()
     {
         var interaction = new FakeInteractionService

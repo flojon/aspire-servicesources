@@ -12,8 +12,11 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal sealed record Unconfigured(string ServiceName, ServiceDefinition Definition);
 
 /// <summary>What one run of the source dialog saved and what it refused; both empty when nothing was answered.</summary>
-internal sealed record UnconfiguredPromptResult(IReadOnlyList<Raw> Saved, IReadOnlyList<Raw> Failed)
+internal sealed record UnconfiguredPromptResult(IReadOnlyList<Raw> Saved, IReadOnlyList<Raw> Failed, bool AlreadyOpen = false)
 {
+    /// <summary>Every service asked about already has a dialog open, so this run asked nothing.</summary>
+    public static readonly UnconfiguredPromptResult Open = new([], [], AlreadyOpen: true);
+
     public static readonly UnconfiguredPromptResult Nothing = new([], []);
 
     /// <summary>The body of the "Source not saved" notification.</summary>
@@ -80,6 +83,44 @@ internal static class UnconfiguredPrompt
         CancellationToken cancellationToken,
         bool notifyNotSaved = true)
     {
+        // The startup dialog and a Configure click must not both ask about, and write, the same service.
+        var claimed = unconfigured.Where(service => OpenDialogs.TryAdd(DialogKey(appHostDirectory, service), 0)).ToList();
+        if (claimed.Count == 0)
+        {
+            ServiceSourcesLog.Information(
+                logger, $"A source dialog is already open for {Names(unconfigured)}, so another was not opened.");
+            return UnconfiguredPromptResult.Open;
+        }
+
+        try
+        {
+            return await RunClaimedAsync(services, claimed, writer, appHostDirectory, logger, cancellationToken, notifyNotSaved)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            foreach (var service in claimed)
+            {
+                OpenDialogs.TryRemove(DialogKey(appHostDirectory, service), out _);
+            }
+        }
+    }
+
+    // Keyed by AppHost directory as well as name, so two AppHosts in one process do not block each other.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> OpenDialogs = new();
+
+    private static string DialogKey(string appHostDirectory, Unconfigured service) =>
+        $"{appHostDirectory}\0{service.ServiceName}";
+
+    private static async Task<UnconfiguredPromptResult> RunClaimedAsync(
+        IServiceProvider services,
+        IReadOnlyList<Unconfigured> unconfigured,
+        IDeveloperConfigWriter writer,
+        string appHostDirectory,
+        ILogger logger,
+        CancellationToken cancellationToken,
+        bool notifyNotSaved)
+    {
         var interaction = services.GetService<IInteractionService>();
         if (interaction is null || !interaction.IsAvailable)
         {
@@ -136,19 +177,25 @@ internal static class UnconfiguredPrompt
                 interaction, services, unconfigured[i], input.Value.Trim(), writer, appHostDirectory, logger, token)
                 .ConfigureAwait(false);
 
-            if (token.IsCancellationRequested)
-            {
-                return UnconfiguredPromptResult.Nothing;
-            }
-
+            // Keep what was already written: the file changed, so the result and notification must say so.
             if (outcome is { Saved: true } ok)
             {
                 saved.Add(ok.Line);
             }
-            else if (outcome is { } failure)
+            else if (outcome is { } failure && !token.IsCancellationRequested)
             {
                 failed.Add(failure.Line);
             }
+
+            if (token.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        if (token.IsCancellationRequested && saved.Count == 0)
+        {
+            return UnconfiguredPromptResult.Nothing;
         }
 
         if (saved.Count == 0 && failed.Count == 0)
