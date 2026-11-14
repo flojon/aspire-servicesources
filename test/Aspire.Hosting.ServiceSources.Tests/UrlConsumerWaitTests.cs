@@ -256,7 +256,7 @@ public class UrlConsumerWaitTests
     /// Covers the wait only. A <b>container</b> that <c>WithReference</c>s such a connection string
     /// is a separate, still-open case: the container's annotation points at the connection-string
     /// resource rather than at the service, so the pre-flight does not see it and the container
-    /// fails the way #58 describes. See the remarks on <c>UrlSource.ConsumedUrlService</c>.
+    /// is not rewritten and fails inside DCP. See the remarks on <c>UnregisteredServiceStartupGuard</c>.
     /// </remarks>
     [Fact]
     public async Task UrlSourcedService_ReferencedByAConnectionString_ResolvesRatherThanHanging()

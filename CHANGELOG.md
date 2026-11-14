@@ -39,6 +39,17 @@ never existed. Check the tag of the last release before adding one.
   `Unwrap<T>()` throw on a placeholder. See [Choosing a source in the
   dashboard](docs/guides/interactive-configuration.md).
 
+- **A container can now `WithReference` a `"url"`-sourced service** ([#72]). It used to be refused
+  at startup, because a `"url"` service has no resource for DCP to route container networking
+  through. The container now starts with the URL injected as a literal, `scheme://host[:port]`
+  (a default port is omitted; there is no path, query or credentials), in both the
+  `INVENTORY_HTTPS` and `services__inventory__https__0` variables, and in any
+  `WithEnvironment` or `WithArgs` value built from the service's endpoint. A loopback URL means the
+  container itself, because Aspire gives these containers no route to the host. Two forms are still
+  not covered, and fail inside DCP as before: a container that consumes the service only through
+  an opaque `WithEnvironment(context => ...)` callback, and one that reaches it through a
+  connection string built from its endpoint.
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking

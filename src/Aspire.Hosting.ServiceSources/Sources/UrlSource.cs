@@ -14,21 +14,16 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// The odd one out: every other source registers its resource, but there is nothing here for Aspire
 /// to run. Aspire's <c>ExternalServiceResource</c> would be the natural home, but it is
 /// <c>sealed</c> and carries no <see cref="EndpointAnnotation"/>, so it cannot satisfy
-/// <see cref="IResourceWithServiceDiscovery"/> (tracked here as #72). So this source keeps building
+/// <see cref="IResourceWithServiceDiscovery"/>. So this source keeps building
 /// the <see cref="EndpointAnnotation"/> by hand, with the <see cref="AllocatedEndpoint"/> set
 /// eagerly since DCP will never allocate one, and leaves the resource unregistered.
 /// <para>
-/// That is issue #58, which stays open for this source as #72: a <b>container</b> consumer of one
-/// of these fails inside DCP with
+/// A <b>container</b> consumer would fail inside DCP with
 /// <c>"Host endpoint 'x' on resource 'y' should have an associated DCP Service resource already set
-/// up"</c>. <see cref="UnregisteredServiceStartupGuard"/> catches that case up front and explains it.
+/// up"</c>, and registering the resource instead leaves the container never created with nothing to
+/// say why. So <see cref="UnregisteredServiceStartupGuard"/> removes the annotations that make DCP try
+/// and wraps the container's environment and argument callbacks to emit the URL as a literal.
 /// Host-process consumers work and are unaffected.
-/// </para>
-/// <para>
-/// Registering the resource (#58's option 1) clears that DCP failure but replaces it with a worse
-/// one: the consuming container is never created and nothing says why. Delegating to
-/// <c>ExternalServiceResource</c> (option 2) is the route that would work, and is what Aspire's own
-/// type currently blocks.
 /// </para>
 /// <para>
 /// The other consequence of leaving the resource unregistered is that nothing ever publishes a

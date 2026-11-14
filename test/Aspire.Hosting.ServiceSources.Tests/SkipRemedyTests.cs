@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
@@ -107,33 +108,6 @@ public class SkipRemedyTests
     }
 
     /// <remarks>
-    /// The third site, and the one where the switch is the only way forward at all: a container
-    /// consumer of a url service cannot be made to work any other way.
-    /// </remarks>
-    [Fact]
-    public async Task AContainerReferencingAUrlOnlyService_StatesTheCatalogPrecondition()
-    {
-        var directory = TempDirectories.CreateSubdirectory().FullName;
-        File.WriteAllText(Path.Combine(directory, "servicesources.yaml"), """
-            services:
-              inventory:
-                url:
-                  url: https://inventory.example.com
-            """);
-        File.WriteAllText(
-            Path.Combine(directory, "servicesources.local.json"),
-            """{ "services": { "inventory": { "source": "url" } } }""");
-
-        var builder = TestHelpers.CreateBuilderThatCanStart(directory);
-        builder.AddContainer("storefront", "nginx:alpine").WithReference(builder.AddService("inventory"));
-
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
-
-        AssertStatesThePrecondition(ex.Message);
-    }
-
-    /// <remarks>
     /// A dropped <c>WaitFor</c> reaches this same sentence, and start ordering rather than
     /// configuration is what that reader lost — so the offer has to name both.
     /// </remarks>
@@ -178,21 +152,25 @@ public class SkipRemedyTests
     }
 
     /// <remarks>
-    /// Thrown from inside <c>BeforeStartEvent</c>, so it lands in the host's log rather than only in
+    /// Written from inside <c>BeforeStartEvent</c>, so it lands in the host's log rather than only in
     /// a developer's console.
     /// </remarks>
     [Fact]
     public async Task AServiceNameShapedLikeASecondEntry_DoesNotForgeOneThroughAContainerReference()
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
+        var log = TestHelpers.CaptureServiceSourcesLog(builder);
         var service = new UrlSource().Resolve(
             builder, HostileName, UrlOnly, new ServiceDeveloperConfig { Source = "url" });
-        builder.AddContainer("storefront", "nginx:alpine").WithReference(service);
+        // TlsEnabled has no literal, which is what makes the rewrite name the service in a warning.
+        builder.AddContainer("storefront", "nginx:alpine")
+            .WithReference(service)
+            .WithEnvironment("TLS", service.GetEndpoint("https").Property(EndpointProperty.TlsEnabled));
 
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        await CallbackRunner.EnvironmentAsync(builder.Resources.OfType<ContainerResource>().Single());
 
-        AssertNoForgedEntry(ex.Message);
+        AssertNoForgedEntry(Assert.Single(log, entry => entry.Level == LogLevel.Warning).Message);
     }
 
     [Fact]

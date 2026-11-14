@@ -15,8 +15,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// Shares <see cref="UrlSource"/>'s unregistered-facade shape (<see cref="ResolvedService.BridgeUnregistered"/>),
 /// including the <see cref="UnregisteredServiceStartupGuard"/> wait-drop (#170) — but registers no
-/// <see cref="EndpointAnnotation"/> at all, so the container-reference failure #58/#72 describes
-/// doesn't apply here: nothing for DCP to trip over.
+/// <see cref="EndpointAnnotation"/> at all, so the container-reference failure a
+/// <c>"url"</c> service needs a rewrite for doesn't apply here: nothing for DCP to trip over.
 /// </para>
 /// <para>
 /// Every <c>Configure</c> call is skipped with a warning via <see cref="Reachability.OutOfBandSources"/>,

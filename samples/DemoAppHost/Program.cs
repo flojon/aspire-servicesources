@@ -25,8 +25,19 @@ var orders = builder.AddService("orders")
 
 // "url" source: resolves straight to a fixed, already-known URL — no resource for Aspire to
 // run. See servicesources.local.json.example. This one runs out of band, so any Configure call
-// on it would be skipped with a logged warning, and a container cannot reference it.
+// on it would be skipped with a logged warning.
 var inventory = builder.AddService("inventory");
+
+// Lets the smoke test run a container that references the "url" service, to see the URL arrive as a
+// literal inside it (scripts/smoketest-container-source.sh). A real AppHost wires its own
+// containers; this has no effect when the variable is unset.
+if (Environment.GetEnvironmentVariable("SERVICESOURCES_DEMO_URL_CONSUMER") is { Length: > 0 } consumerImage)
+{
+    builder.AddContainer("urlconsumer", consumerImage)
+        .WithEntrypoint("sleep")
+        .WithArgs("3600")
+        .WithReference(inventory);
+}
 
 // "container" source: runs a published container image locally via Aspire's own
 // container-runtime integration. See servicesources.local.json.example.

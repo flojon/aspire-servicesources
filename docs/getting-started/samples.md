@@ -40,9 +40,9 @@ aspire restore
 aspire run
 ```
 
-Both of its services use the `"container"` source so that `payments` can
-`withReference(inventory)`: a `"url"` service runs out of band, and a container consumer of one is
-[rejected up front](../sources/url.md). A third resource, the `probe` executable, hands the same
+Both of its services use the `"container"` source so that the `probe` and `payments` resources talk to
+something this sample runs: a container that references a `"url"` service is handed its address
+as a literal (see [the `"url"` source](../sources/url.md)), which needs a public host. A third resource, the `probe` executable, hands the same
 `inventory` handle to Aspire's *own* `withReference()` and to `getServiceEndpoint()`, and prints
 what each injected — so it shows as *Exited*, not Running, and those two log lines are where you
 see both the native service-discovery path and the

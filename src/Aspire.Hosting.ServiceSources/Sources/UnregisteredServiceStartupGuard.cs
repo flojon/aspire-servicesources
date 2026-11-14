@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.ServiceSources.Messages;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -11,9 +13,15 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// unregistered facade, so the wait would otherwise hang forever), reporting the drop as a skip.
 /// </summary>
 /// <remarks>
-/// The container-reference refusal (#58/#72) stays scoped to <c>"url"</c> alone: that failure comes
-/// from <c>"url"</c>'s eagerly-set <see cref="AllocatedEndpoint"/> confusing DCP, and
-/// <c>"disabled"</c> registers no <see cref="EndpointAnnotation"/> for a container to trip over.
+/// The container-reference rewrite stays scoped to <c>"url"</c> alone: DCP fails a container that
+/// consumes <c>"url"</c>'s eagerly-set <see cref="AllocatedEndpoint"/>, and <c>"disabled"</c>
+/// registers no <see cref="EndpointAnnotation"/> for a container to trip over.
+/// <para>
+/// The rewrite runs in this handler, so one subscribed earlier, or a later one that adds a consuming
+/// annotation afterwards, escapes it. A container consuming a <c>"url"</c> service through an opaque
+/// callback alone, or through a connection string built from its endpoint, leaves nothing to match
+/// and is not rewritten either.
+/// </para>
 /// </remarks>
 internal static class UnregisteredServiceStartupGuard
 {
@@ -50,22 +58,17 @@ internal static class UnregisteredServiceStartupGuard
     {
         builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
         {
+            var logger = (ILogger?)@event.Services.GetService<ILoggerFactory>()?.CreateLogger("Aspire.Hosting.ServiceSources")
+                ?? NullLogger.Instance;
+
             foreach (var consumer in @event.Model.Resources.OfType<ContainerResource>())
             {
-                if (ConsumedUrlService(consumer) is not { } urlService)
-                {
-                    continue;
-                }
+                var urlServices = ConsumedUrlServices(consumer);
 
-                throw ServiceSourcesConfigurationException.For(
-                    // consumer.Name is an Aspire resource name, which Aspire's own validator already bounds,
-                    // so it is safe as Raw; urlService.Name is a catalog key and goes through Name.
-                    $"Container '{Raw.Escaped(consumer.Name)}' references service " +
-                    $"'{new Name(urlService.Name)}', whose source is 'url'. " +
-                    $"A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
-                    $"plumb container-to-host networking through, and the container would fail to start. " +
-                    $"Reference it from a project or executable instead, or {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}. " +
-                    $"Tracked as issue #72.");
+                if (urlServices.Count > 0)
+                {
+                    UrlContainerReferenceRewrite.Apply(consumer, urlServices, logger);
+                }
             }
 
             var warnings = ServiceSourcesWarnings.For(builder);
@@ -145,19 +148,20 @@ internal static class UnregisteredServiceStartupGuard
     private const string ReferenceRelationship = "Reference";
 
     /// <summary>
-    /// The <c>"url"</c>-sourced service <paramref name="consumer"/> consumes, or
-    /// <see langword="null"/> if it consumes none.
+    /// The <c>"url"</c>-sourced services <paramref name="consumer"/> consumes; empty if it consumes none.
     /// </summary>
     /// <remarks>
     /// Matches both shapes Aspire leaves depending on how the AppHost wrote the dependency:
     /// <c>WithReference(service)</c> (<see cref="EndpointReferenceAnnotation"/>) and
     /// <c>WithEnvironment("X", service.GetEndpoint(...))</c> (<see cref="ResourceRelationshipAnnotation"/>,
     /// narrowed to <see cref="ReferenceRelationship"/> so <c>WithParentRelationship</c> isn't failed).
-    /// A dependency reaching DCP some other way (an opaque callback, a connection string — still
-    /// open, tracked with #58/#72) isn't caught here.
+    /// A dependency reaching DCP some other way (an opaque callback alone, a hand-written annotation,
+    /// a connection string) isn't caught here, and so is not rewritten.
     /// </remarks>
-    private static ServiceResource? ConsumedUrlService(ContainerResource consumer)
+    private static List<ServiceResource> ConsumedUrlServices(ContainerResource consumer)
     {
+        var found = new List<ServiceResource>();
+
         foreach (var annotation in consumer.Annotations)
         {
             IResource? consumed = annotation switch
@@ -169,13 +173,13 @@ internal static class UnregisteredServiceStartupGuard
                 _ => null,
             };
 
-            if (consumed is ServiceResource candidate && IsUrlSourcedService(candidate))
+            if (consumed is ServiceResource candidate && IsUrlSourcedService(candidate) && !found.Contains(candidate))
             {
-                return candidate;
+                found.Add(candidate);
             }
         }
 
-        return null;
+        return found;
     }
 
     /// <summary>

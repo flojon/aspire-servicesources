@@ -6,8 +6,12 @@ Aspire to run; the endpoint resolves straight to the configured URL.
 
 Three consequences follow from the service running out of band. The AppHost's
 [`Configure` calls are skipped and logged](../guides/configuration.md#configuring-a-resolved-service). A **container**
-can't `WithReference` it — a project or executable can — which fails with a clear error rather than
-a DCP stack trace; see [#58](https://github.com/flojon/aspire-servicesources/issues/58). And a
+that `WithReference`s it is handed the URL as a literal, `scheme://host[:port]` with a default port
+omitted and no path, query or credentials, because there is no resource for Aspire to route
+container-to-host traffic through. A loopback URL such as `http://localhost:8765` therefore means
+the container itself, since Aspire gives these containers no route to the host. A container that reaches the service some other way (an opaque
+`WithEnvironment(context => ...)` callback alone, or a connection string built from its endpoint) is
+not rewritten and fails inside DCP. And a
 consumer's `WaitFor` on it resolves immediately instead of waiting:
 
 ```csharp
@@ -20,8 +24,7 @@ builder.AddService("storefront")
 There is no lifetime to order against — the URL is already up, or it isn't, and nothing this
 AppHost starts will change that — so the wait is dropped rather than satisfied. `WaitForCompletion`
 goes the same way, since a service running out of band is never going to exit. Every consumer is
-covered, containers included: a container that *references* a url service is still refused as
-above, but one that only waits on it starts normally.
+covered, containers included: a container that only waits on a url service starts normally, as does one that references it.
 
 The drop is **logged**, alongside any `Configure` calls the same service skipped:
 

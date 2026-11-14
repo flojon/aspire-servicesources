@@ -96,6 +96,13 @@ overridden from `appsettings`, user secrets, environment variables or the comman
   but another process, or an editor, saving the file at the same moment can lose a change.
 - **A `path` directory that comes from the catalog is not checked when you save.** A broken catalog
   `path:` only fails on the next run. A directory you type in the dialog is checked.
+- **The dialog can crash the dashboard while the AppHost is still starting.** The dialog is raised
+  when startup begins, which is when the AppHost is busiest. On Aspire 13.6.x a choice prompt opened
+  under heavy concurrent activity can fail with `Cannot read properties of undefined (reading 'focus')`
+  (an Aspire bug, [microsoft/aspire#21102](https://github.com/microsoft/aspire/issues/21102)), and
+  the dashboard shows "An unhandled error has occurred" until the prompt is answered or dismissed.
+  Once startup settles the same dialog opens normally. If it happens, wait for the stack to go idle
+  and reload, or use the **Configure** command on the placeholder row afterwards.
 
 ## When it is off
 

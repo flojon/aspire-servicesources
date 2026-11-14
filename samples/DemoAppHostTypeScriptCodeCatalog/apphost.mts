@@ -34,8 +34,8 @@ await builder.addServiceCatalog(async (catalog) => {
   // Two sources are described here on purpose, the same reason
   // samples/DemoAppHostTypeScript/servicesources.yaml gives inventory both a url: and a
   // container: block: a "url"-sourced service runs out of band with no Aspire resource, so the
-  // payments container below can't reference it (#72) unless inventory also resolves through
-  // "container". servicesources.local.json picks the actual source; apphost.mts never changes.
+  // container source gives the sample a real container to run instead of a public host.
+  // servicesources.local.json picks the actual source; apphost.mts never changes.
   const inventory = await catalog.addService('inventory');
   await inventory.withUrl('https://httpbin.org');
   await inventory.withContainer('nginxdemos/hello', 80, { defaultTag: 'latest' });
