@@ -71,7 +71,8 @@ never existed. Check the tag of the last release before adding one.
   again after 1s, 2s, 4s … (at most 30s between attempts), logging each attempt, and left stopped with
   an error line after 8 restarts in a row; a tunnel that then stays up for 30s resets the count, and
   starting the resource yourself after it gave up does too. Starting it while a restart is waiting
-  cancels that restart once it is up. A tunnel that never came up,
+  cancels that restart once it is up. A tunnel that stays running but
+  unhealthy for 60s is logged once, with kubectl's last line. A tunnel that never came up,
   one the developer stopped, and one that Aspire could not launch are not restarted. Consumers see
   the same local port again but any connection open through the old tunnel is gone, so they must
   reconnect. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).

@@ -40,9 +40,13 @@ public class PortForwardSupervisorTests
         /// <summary>Runs while a start request is in flight, as Aspire's own snapshots do.</summary>
         public Action? WhileStarting { get; set; }
 
+        /// <summary>The token each start request was given.</summary>
+        public List<CancellationToken> StartTokens { get; } = [];
+
         public Task<string?> StartAsync(CancellationToken cancellationToken)
         {
             Starts++;
+            StartTokens.Add(cancellationToken);
             WhileStarting?.Invoke();
             _starts.Writer.TryWrite(Starts);
             return Task.FromResult(StartAnswer);
@@ -401,6 +405,62 @@ public class PortForwardSupervisorTests
 
         Assert.Contains("attempt 2 of 8", text);
         Assert.Equal(2, harness.Control.Starts);
+    }
+
+    [Fact]
+    public async Task ARunningSnapshotDuringAStartRequest_DoesNotCancelTheRequestItself()
+    {
+        // Cancelling a Start midway leaves the real resource in Starting with no process.
+        var harness = new Harness();
+        harness.Control.WhileStarting = () => harness.Publish(KnownResourceStates.Running, health: HealthStatus.Healthy);
+        harness.BringUp();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+        await harness.IdleAsync();
+        await harness.FinishAsync();
+
+        Assert.Single(harness.Control.StartTokens);
+        Assert.False(harness.Control.StartTokens[0].CanBeCanceled && harness.Control.StartTokens[0].IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task ARunningTunnelThatStaysUnhealthy_IsSaidOnce_WithKubectlsLastLine()
+    {
+        var harness = new Harness();
+        harness.Control.LastOutput = "error: unable to forward port because pod is not running";
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Unhealthy);
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.UnhealthyWarnAfter);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Unhealthy);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Unhealthy);
+
+        var (level, text) = await harness.Logger.NextAsync();
+        await harness.FinishAsync();
+
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Contains("has not accepted a connection", text);
+        Assert.Contains("unable to forward port", text);
+        Assert.Single(harness.Logger.Written);
+        Assert.Equal(0, harness.Control.Starts);
+    }
+
+    [Fact]
+    public async Task ARunningTunnelThatIsUnhealthyBriefly_IsNotSaid()
+    {
+        var harness = new Harness();
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Unhealthy);
+        await harness.IdleAsync();
+        harness.Time.Advance(TimeSpan.FromSeconds(10));
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Healthy);
+        await harness.FinishAsync();
+
+        Assert.Empty(harness.Logger.Written);
     }
 
     [Fact]

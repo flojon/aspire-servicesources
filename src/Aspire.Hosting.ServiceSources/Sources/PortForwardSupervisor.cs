@@ -79,6 +79,9 @@ internal sealed class PortForwardSupervisor(
     /// </summary>
     internal static readonly TimeSpan StableUptime = TimeSpan.FromSeconds(30);
 
+    /// <summary>How long a running tunnel may stay unhealthy before it is said so in the log.</summary>
+    internal static readonly TimeSpan UnhealthyWarnAfter = TimeSpan.FromSeconds(60);
+
     private const string LogCategory = "Aspire.Hosting.ServiceSources";
 
     private static readonly ConditionalWeakTable<IResource, object> Installed = new();
@@ -92,6 +95,8 @@ internal sealed class PortForwardSupervisor(
     private bool _gaveUp;
     private int _restarts;
     private DateTimeOffset? _healthySince;
+    private DateTimeOffset? _unhealthySince;
+    private bool _warnedUnhealthy;
     private CancellationTokenSource? _pendingRestart;
     private Task _restartTask = Task.CompletedTask;
 
@@ -209,6 +214,8 @@ internal sealed class PortForwardSupervisor(
             _stopRequested = false;
             _ended = false;
             _healthySince = null;
+            _unhealthySince = null;
+            _warnedUnhealthy = false;
 
             lock (_gate)
             {
@@ -231,6 +238,20 @@ internal sealed class PortForwardSupervisor(
             {
                 _ready = true;
                 _healthySince ??= timeProvider.GetUtcNow();
+                _unhealthySince = null;
+                _warnedUnhealthy = false;
+            }
+            else if (snapshot.HealthReports.Length > 0)
+            {
+                // kubectl is alive but the tunnel does not accept connections, which nothing else
+                // reports: a Service with no ready pods behind it leaves kubectl running and the port closed.
+                _unhealthySince ??= timeProvider.GetUtcNow();
+
+                if (!_warnedUnhealthy && timeProvider.GetUtcNow() - _unhealthySince >= UnhealthyWarnAfter)
+                {
+                    _warnedUnhealthy = true;
+                    await WarnUnhealthyAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         else if (Is(state, KnownResourceStates.Stopping))
@@ -289,6 +310,17 @@ internal sealed class PortForwardSupervisor(
     }
 
     private void CancelPendingRestart() => Interlocked.Exchange(ref _pendingRestart, null)?.Cancel();
+
+    private async Task WarnUnhealthyAsync(CancellationToken cancellationToken)
+    {
+        var said = await KubectlSaidAsync(cancellationToken).ConfigureAwait(false);
+
+        ServiceSourcesLog.Warning(
+            logger,
+            $"Service '{new Name(serviceName)}': the kubectl port-forward is running but has not accepted a connection "
+            + $"for {(int)UnhealthyWarnAfter.TotalSeconds}s, so anything that waits for the service is still held. {said}"
+            + $"A Service with no ready pods behind it looks like this: check that it has endpoints.");
+    }
 
     private async Task FailedBeforeReadyAsync(int? exitCode, CancellationToken cancellationToken)
     {

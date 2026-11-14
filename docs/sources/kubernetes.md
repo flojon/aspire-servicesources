@@ -110,6 +110,10 @@ restarts in a row the tunnel is left stopped and an error is logged; start the r
 dashboard once the cluster is reachable. A tunnel that stays up for 30s resets the count, and so does
 starting the resource yourself after it gave up. Starting it while a restart is waiting cancels that restart once it is up.
 
+A tunnel that is running but has not accepted a connection for 60s (typically a Service with no ready
+pods behind it, which leaves `kubectl` running with the port closed) is logged once as a warning with
+`kubectl`'s last line. It is not restarted, and a consumer that `WaitFor`s the service stays held.
+
 This is deliberately modest:
 
 - Nothing is restarted when the developer stops the resource, when the AppHost is shutting down, or
