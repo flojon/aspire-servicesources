@@ -22,7 +22,7 @@ public class SourceChoicesTests
     public void All_EqualsTheSourceDictionaryKeys() =>
         Assert.Equal(
             new[] { "container", "disabled", "kubernetes", "path", "repository", "url" },
-            SourceChoices.All().Order(StringComparer.Ordinal));
+            ServiceSourcesBuilderExtensions.Sources.Keys.Order(StringComparer.Ordinal));
 
     [Fact]
     public void For_DefinitionWithoutContainerBlock_OmitsContainer() =>
@@ -69,6 +69,6 @@ public class SourceChoicesTests
     [Fact]
     public void DisplayOrder_CoversEverySource() =>
         Assert.Equal(
-            SourceChoices.All().Order(StringComparer.Ordinal),
+            ServiceSourcesBuilderExtensions.Sources.Keys.Order(StringComparer.Ordinal),
             SourceChoices.DisplayOrder.Order(StringComparer.Ordinal));
 }
