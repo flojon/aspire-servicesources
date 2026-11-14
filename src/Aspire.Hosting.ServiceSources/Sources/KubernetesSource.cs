@@ -16,9 +16,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         // problem, and the scheme ahead of BuildPortForwardArgs, whose last act is to allocate a
         // port: an unsupported scheme is config validation like the rest and shouldn't burn an
         // allocation on its way to throwing.
-        var kubernetes = RequireKubernetesBlock(serviceName, definition);
-        var scheme = EndpointScheme.Resolve(
-            serviceName, "kubernetes", config.Kubernetes.Scheme, kubernetes.Scheme, definition.Origin);
+        var scheme = ResolveScheme(serviceName, definition, config);
 
         var args = BuildPortForwardArgs(serviceName, definition, config, portAllocator, out var localPort, out _);
 
@@ -44,6 +42,9 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Kubernetes is null ? null : typeof(ServiceExecutableResource);
 
+    public bool IsOfferedFor(ServiceDefinition definition) =>
+        !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
+
     internal static string[] BuildPortForwardArgs(
         string serviceName,
         ServiceDefinition definition,
@@ -54,6 +55,32 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     {
         var kubernetes = RequireKubernetesBlock(serviceName, definition);
 
+        (var context, remotePort) = ResolveForwardTarget(serviceName, kubernetes, definition, config);
+
+        localPort = portAllocator.AllocatePort();
+
+        return KubectlPortForward.Args(
+            kubernetes.Service!, localPort, remotePort, context, config.Kubernetes.Namespace);
+    }
+
+    /// <summary>
+    /// Every configuration check <see cref="Resolve"/> makes, in the same order, without allocating a port.
+    /// </summary>
+    /// <exception cref="ServiceSourcesConfigurationException">The configuration would not resolve.</exception>
+    internal static void Validate(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        ResolveScheme(serviceName, definition, config);
+        ResolveForwardTarget(serviceName, RequireKubernetesBlock(serviceName, definition), definition, config);
+    }
+
+    private static string ResolveScheme(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config) =>
+        EndpointScheme.Resolve(
+            serviceName, "kubernetes", config.Kubernetes.Scheme, RequireKubernetesBlock(serviceName, definition).Scheme,
+            definition.Origin);
+
+    private static (string Context, int RemotePort) ResolveForwardTarget(
+        string serviceName, KubernetesMetadata kubernetes, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
         if (string.IsNullOrWhiteSpace(config.Kubernetes.Context))
         {
             throw ServiceSourcesConfigurationException.For(
@@ -61,7 +88,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
                 $"servicesources.local.json.");
         }
 
-        remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw ServiceSourcesConfigurationException.For(
+        var remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}': no port configured for source 'kubernetes' — set " +
             $"'kubernetes.port' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.");
 
@@ -71,10 +98,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
                 $"Service '{new Name(serviceName)}': port value '{remotePort}' is not a valid port (must be between 1 and 65535).");
         }
 
-        localPort = portAllocator.AllocatePort();
-
-        return KubectlPortForward.Args(
-            kubernetes.Service!, localPort, remotePort, config.Kubernetes.Context, config.Kubernetes.Namespace);
+        return (config.Kubernetes.Context, remotePort);
     }
 
     /// <summary>

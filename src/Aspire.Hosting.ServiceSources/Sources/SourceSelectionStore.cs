@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -75,23 +76,12 @@ internal static class SourceSelectionStore
 
         try
         {
-            FileAttributes attributes;
-            try
+            return BoundedFile.TryRead(path, MaxBytes, out var bytes) switch
             {
-                attributes = File.GetAttributes(path);
-            }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-            {
-                return (empty, SelectionFileState.Missing);
-            }
-
-            if (attributes.HasFlag(FileAttributes.Directory) || attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                return (empty, SelectionFileState.Invalid);
-            }
-
-            var bytes = ReadBounded(path);
-            return bytes is null ? (empty, SelectionFileState.Invalid) : Parse(bytes, empty);
+                BoundedReadStatus.Missing => (empty, SelectionFileState.Missing),
+                BoundedReadStatus.Read => Parse(bytes, empty),
+                _ => (empty, SelectionFileState.Invalid),
+            };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -202,22 +192,6 @@ internal static class SourceSelectionStore
 
     internal static string PathIn(string appHostDirectory) =>
         Path.Combine(ToolDirectory.PathIn(appHostDirectory), FileName);
-
-    private static byte[]? ReadBounded(string path)
-    {
-        // FileShare.Delete so a concurrent save's rename over this name is not held hostage on Windows.
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-        var buffer = new byte[MaxBytes + 1];
-        var length = 0;
-
-        int read;
-        while (length < buffer.Length && (read = stream.Read(buffer, length, buffer.Length - length)) > 0)
-        {
-            length += read;
-        }
-
-        return length > MaxBytes ? null : buffer.AsSpan(0, length).ToArray();
-    }
 
     private static (IReadOnlyDictionary<string, SelectionEntry>, SelectionFileState) Parse(
         byte[] bytes, Dictionary<string, SelectionEntry> empty)

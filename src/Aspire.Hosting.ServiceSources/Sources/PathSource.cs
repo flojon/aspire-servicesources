@@ -146,7 +146,7 @@ internal sealed class PathSource(
     {
         if (config.Path.Path is { } overridePath)
         {
-            return LocalGitCheckout.ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "path.path", overridePath, appHostDirectory);
+            return ResolveOverride(serviceName, overridePath, appHostDirectory);
         }
 
         RequireCatalogPath(serviceName, definition);
@@ -167,6 +167,11 @@ internal sealed class PathSource(
 
         return confined;
     }
+
+    /// <summary>A developer's own <c>path.path</c>, resolved against the AppHost directory and checked to exist.</summary>
+    /// <exception cref="ServiceSourcesConfigurationException">The directory does not exist.</exception>
+    internal static string ResolveOverride(string serviceName, string overridePath, string appHostDirectory) =>
+        LocalGitCheckout.ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "path.path", overridePath, appHostDirectory);
 
     /// <summary>
     /// Refuses a <c>"path"</c> service whose catalog entry declares no directory to use — the
