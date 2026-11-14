@@ -214,7 +214,7 @@ internal static class DeveloperConfigFileSource
     /// configuration under our prefix.
     /// </remarks>
     private static (
-        MemoryConfigurationSource Source,
+        FileLayerSource Source,
         IReadOnlyList<string> RootKeys,
         IReadOnlySet<string> ConfiguringRootKeys) ReadFileSource(string path)
     {
@@ -261,9 +261,24 @@ internal static class DeveloperConfigFileSource
                 .Select(entry => entry.Key.Split(':')[0])
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            return (new MemoryConfigurationSource { InitialData = reRooted }, rootKeys, configuringRootKeys);
+            return (new FileLayerSource { InitialData = reRooted }, rootKeys, configuringRootKeys);
         }
     }
+
+    /// <summary>The file's layer in the configuration chain.</summary>
+    /// <remarks>
+    /// Its own type so <see cref="IsFileLayer"/> can find the file's provider by identity: later inserts at
+    /// index 0, such as the catalog's <c>defaultSource</c> layer, move it from any fixed position.
+    /// </remarks>
+    internal sealed class FileLayerSource : MemoryConfigurationSource, IConfigurationSource
+    {
+        IConfigurationProvider IConfigurationSource.Build(IConfigurationBuilder builder) => new FileLayerProvider(this);
+    }
+
+    private sealed class FileLayerProvider(FileLayerSource source) : MemoryConfigurationProvider(source);
+
+    /// <summary>Whether <paramref name="provider"/> was built from the file's <see cref="FileLayerSource"/>.</summary>
+    internal static bool IsFileLayer(IConfigurationProvider provider) => provider is FileLayerProvider;
 
     /// <summary>
     /// The root key of <paramref name="builder"/>'s file that looks like a misspelling of

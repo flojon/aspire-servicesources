@@ -150,6 +150,7 @@ public class UnconfiguredServiceTests
         var reason = Assert.Single(snapshot.Properties, p => p.Name == "Reason").Value?.ToString();
 
         Assert.Contains("ServiceSources:Services:inventory:source", reason);
+        Assert.Contains("Configure", reason);
         Assert.DoesNotContain("servicesources.local.json", reason);
         Assert.DoesNotContain(Path.DirectorySeparatorChar, reason!);
     }
@@ -250,5 +251,47 @@ public class UnconfiguredServiceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         await notifications.WaitForDependenciesAsync(worker.Resource, cts.Token);
+    }
+
+    [DcpFact]
+    public async Task PlaceholderState_SurvivesAppStartup()
+    {
+        var dcp = Environment.GetEnvironmentVariable(DcpFactAttribute.CliVariable)!;
+        var dashboard = Environment.GetEnvironmentVariable(DcpFactAttribute.DashboardVariable)!;
+
+        var builder = Builder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["DcpPublisher:CliPath"] = dcp,
+            ["DcpPublisher:DashboardPath"] = dashboard,
+            ["ASPIRE_ALLOW_UNSECURED_TRANSPORT"] = "true",
+            ["ASPNETCORE_URLS"] = $"http://localhost:{FreePort()}",
+            ["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"] = $"http://localhost:{FreePort()}",
+        });
+        builder.AddService("inventory");
+
+        using var app = builder.Build();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await app.StartAsync(cts.Token);
+
+        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
+        var placeholder = builder.Resources.OfType<UnconfiguredServiceResource>().Single();
+
+        // The startup orchestrator republishes resource state after BeforeStartEvent; the snapshot must outlive it.
+        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+        Assert.True(notifications.TryGetCurrentState(placeholder.Name, out var latest));
+        var snapshot = latest!.Snapshot;
+        Assert.Equal(UnconfiguredSource.StateText, snapshot.State?.Text);
+        Assert.Equal("Service (unconfigured)", snapshot.ResourceType);
+        Assert.Contains(snapshot.Properties, p => p.Name == "Reason");
+
+        await app.StopAsync(cts.Token);
+    }
+
+    private static int FreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
     }
 }

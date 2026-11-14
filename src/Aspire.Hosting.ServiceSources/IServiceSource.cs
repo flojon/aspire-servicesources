@@ -35,4 +35,11 @@ internal interface IServiceSource
     /// source switch skipped. Answering too broadly only turns that throw into a warning.
     /// </remarks>
     Type? DeclaredResourceType(IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) => null;
+
+    /// <summary>
+    /// Whether <paramref name="definition"/> declares what this source needs, so the interactive
+    /// picker can offer it. A source states its own precondition here, so a source added later needs
+    /// no hard-coded list elsewhere.
+    /// </summary>
+    bool IsOfferedFor(ServiceDefinition definition) => true;
 }

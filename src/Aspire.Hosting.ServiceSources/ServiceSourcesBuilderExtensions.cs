@@ -32,7 +32,7 @@ public static class ServiceSourcesBuilderExtensions
     /// independent registrations, while these six names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
-    private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
         ["repository"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
@@ -110,7 +110,7 @@ public static class ServiceSourcesBuilderExtensions
             // The dashboard Reason stays short; the full text keeps the near-miss hints for a typo'd key.
             ServiceSourcesWarnings.For(builder).AddNotice(Raw.Cause(notConfigured!));
 
-            return UnconfiguredSource.Resolve(builder, name);
+            return UnconfiguredSource.Resolve(builder, name, definition);
         }
 
         // Resolved once here rather than inside each source: the source that actually reads it
@@ -296,7 +296,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <summary>
     /// Lets a service no configuration layer gave a source resolve to a placeholder instead of
     /// throwing, so the AppHost reaches the dashboard. The placeholder starts nothing, has no
-    /// endpoints and shows <c>Not configured</c>.
+    /// endpoints and shows <c>Not configured</c>. Once the AppHost is starting, a dashboard dialog asks
+    /// for a source for each placeholder, and each placeholder has a <c>Configure</c> command that asks
+    /// again for that one service. A valid choice is saved to <c>servicesources.local.json</c> and takes
+    /// effect the next time the AppHost starts; this run stays unconfigured.
     /// </summary>
     /// <remarks>
     /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>,
