@@ -42,4 +42,24 @@ internal interface IServiceSource
     /// no hard-coded list elsewhere.
     /// </summary>
     bool IsOfferedFor(ServiceDefinition definition) => true;
+
+    /// <summary>
+    /// Whether <paramref name="definition"/> with <paramref name="config"/> would resolve under this
+    /// source, answered by the source's own validation and without resolving: no resource is built, no
+    /// port allocated, nothing cloned. An error message uses it to offer a source switch only where
+    /// following it would work.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="false"/>, so a source added later is simply not offered until it
+    /// answers, rather than offered on a promise nothing checked; a test over the registered sources
+    /// fails until a new one answers on purpose.
+    /// <para>
+    /// The stricter sibling of <see cref="IsOfferedFor"/>: that one reads the catalog entry alone and
+    /// serves the picker, which can ask for values the entry lacks, so it may say yes where this says
+    /// no. This one means "works as it stands", and a source answering yes here should also answer
+    /// yes to <see cref="IsOfferedFor"/>. A test over the registered sources enforces that
+    /// implication on sample entries and configs, so a source that drifts fails it.
+    /// </para>
+    /// </remarks>
+    bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) => false;
 }
