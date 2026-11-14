@@ -18,7 +18,7 @@
     get past. The run-time report in GuestLanguagePackages still stands behind it.
   -->
   <PropertyGroup>
-    <ServiceSourcesJavaScriptMinVersion>13.6.1</ServiceSourcesJavaScriptMinVersion>
+    <ServiceSourcesJavaScriptMinVersion>13.6.5</ServiceSourcesJavaScriptMinVersion>
     <ServiceSourcesJavaMinVersion>13.3.0</ServiceSourcesJavaMinVersion>
     <!-- Aspire's own Java integration, an alternative to the Community Toolkit's for kind 'java'.
          Preview-only, so its floor is a preview: see the comparison in the target below. -->
