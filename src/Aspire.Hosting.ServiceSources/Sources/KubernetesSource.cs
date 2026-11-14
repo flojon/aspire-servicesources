@@ -51,18 +51,8 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     internal static bool HasService(ServiceDefinition definition) =>
         !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
 
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config)
-    {
-        try
-        {
-            Validate("", definition, config);
-            return true;
-        }
-        catch (ServiceSourcesConfigurationException)
-        {
-            return false;
-        }
-    }
+    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
+        SourceProbe.Resolves(() => Validate("", definition, config));
 
     internal static string[] BuildPortForwardArgs(
         string serviceName,
@@ -126,13 +116,15 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     /// </summary>
     private static KubernetesMetadata RequireKubernetesBlock(string serviceName, ServiceDefinition definition)
     {
-        if (!HasService(definition))
+        // HasService is the one precondition; the null test beside it lets the compiler carry the
+        // non-null block out, so a later change to HasService cannot return null from here.
+        if (definition.Kubernetes is not { } kubernetes || !HasService(definition))
         {
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}' source is 'kubernetes' but {Raw.Origin(definition.Origin)} has no " +
                 $"kubernetes.service entry.");
         }
 
-        return definition.Kubernetes!;
+        return kubernetes;
     }
 }

@@ -52,18 +52,8 @@ internal sealed class ContainerSource : IServiceSource
         return (image, tag, port, scheme);
     }
 
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config)
-    {
-        try
-        {
-            Validate("", definition, config);
-            return true;
-        }
-        catch (ServiceSourcesConfigurationException)
-        {
-            return false;
-        }
-    }
+    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
+        SourceProbe.Resolves(() => Validate("", definition, config));
 
     private enum ContainerConfigProblem { None, NoImage, NoPort, PortOutOfRange }
 

@@ -345,8 +345,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// </summary>
     private static Raw SourceSwitchRemedy(Raw serviceKey, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        Raw? names = null;
-        var count = 0;
+        var offeredNames = new List<Raw>();
 
         foreach (var name in SourceChoices.DisplayOrder)
         {
@@ -357,17 +356,20 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 continue;
             }
 
-            var quoted = Raw.Compose($"'{Raw.Escaped(name)}'");
-            names = names is { } previous ? Raw.Compose($"{previous} or {quoted}") : quoted;
-            count++;
+            offeredNames.Add(Raw.Compose($"'{Raw.Escaped(name)}'"));
         }
 
-        if (names is not { } offered)
+        if (offeredNames.Count == 0)
         {
             return Raw.Literal("");
         }
 
-        var which = count == 1 ? Raw.Literal("it") : Raw.Literal("one of them");
+        // "a", "a or b", "a, b or c": a comma list with "or" before the last, not "a or b or c".
+        var offered = offeredNames.Count == 1
+            ? offeredNames[0]
+            : Raw.Compose($"{Raw.Join(", ", offeredNames.Take(offeredNames.Count - 1))} or {offeredNames[^1]}");
+
+        var which = offeredNames.Count == 1 ? Raw.Literal("it") : Raw.Literal("one of them");
 
         return Raw.Compose($"It would also resolve under {offered}: set '{serviceKey}:source' to {which}. ");
     }

@@ -1973,6 +1973,28 @@ public class LocalProjectSourceTests
         Assert.Contains("one of them", ex.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Resolve_LocalOnRepositorylessEntryWithThreeResolvableSources_ListsThemWithACommaAndOr()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Project = "",
+            Kind = LocalKinds.Dotnet,
+            Url = new UrlMetadata { Url = "https://orders.example.com" },
+            Container = new ContainerMetadata { Image = "company/orders", Port = 8080 },
+            Kubernetes = new KubernetesMetadata { Service = "orders", Port = 80 },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+        var config = DevConfig();
+        config.Kubernetes.Context = "dev-cluster";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(PlainBuilder(), ServiceName, definition, config));
+
+        Assert.Contains("'container', 'url' or 'kubernetes'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("' or 'url' or '", ex.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The query is part of the source contract: a source that does not override it is never offered,
     /// so each registered source has to answer deliberately. Sources that cannot be a switch target
@@ -1991,10 +2013,8 @@ public class LocalProjectSourceTests
                 continue;
             }
 
-            var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
-            var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
             Assert.True(
-                map.TargetMethods[index].DeclaringType == source.GetType(),
+                OverridesCanResolve(source),
                 $"Source '{name}' does not implement IServiceSource.CanResolve, so it would never be offered as a switch.");
         }
     }
@@ -2060,9 +2080,7 @@ public class LocalProjectSourceTests
 
         foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
         {
-            var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
-            var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
-            if (map.TargetMethods[index].DeclaringType != source.GetType())
+            if (!OverridesCanResolve(source))
             {
                 continue;
             }
@@ -2416,5 +2434,21 @@ public class LocalProjectSourceTests
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
             builder.AddResource(new ResolvingKindResource(serviceName))
                 .WithHttpEndpoint(port: 5555, name: "http");
+    }
+
+    /// <summary>Whether the source implements <see cref="IServiceSource.CanResolve"/> itself, not through the default.</summary>
+    private static bool OverridesCanResolve(IServiceSource source)
+    {
+        var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
+        var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
+        return map.TargetMethods[index].DeclaringType == source.GetType();
+    }
+
+    [Fact]
+    public void SourceProbe_TreatsAnyException_AsNotResolvable()
+    {
+        Assert.True(SourceProbe.Resolves(() => { }));
+        Assert.False(SourceProbe.Resolves(() => throw ServiceSourcesConfigurationException.For($"bad entry")));
+        Assert.False(SourceProbe.Resolves(() => throw new UriFormatException("not a uri")));
     }
 }
