@@ -11,20 +11,20 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 
 - .NET 10 or later — the package targets net10.0 only. AppHosts on net8.0 or net9.0 stay on 0.8.x.
 - An AppHost project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
-- Aspire 13.6.1 or later — see below.
+- Aspire 13.6.5 or later — see below.
 - Whatever the sources you use need on `PATH`: `git` 2.7+ for [`"repository"`](../sources/repository.md),
   `kubectl` for [`"kubernetes"`](../sources/kubernetes.md).
 
 ## Aspire version
 
-!!! warning "This package floors Aspire at 13.6.1, so an AppHost still on 13.5.x gets a mixed Aspire family."
-    NuGet takes the highest floor, so `Aspire.Hosting` is lifted to 13.6.1 while your
+!!! warning "This package floors Aspire at 13.6.5, so an AppHost still on 13.5.x gets a mixed Aspire family."
+    NuGet takes the highest floor, so `Aspire.Hosting` is lifted to 13.6.5 while your
     `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost` and the DCP and dashboard packages the SDK
     pins to it stay where they are. Nothing warns about it at restore. Move your AppHost's own
-    Aspire version to 13.6.1 or later at the same time:
+    Aspire version to 13.6.5 or later at the same time:
 
     ```xml
-    <Sdk Name="Aspire.AppHost.Sdk" Version="13.6.1" />
+    <Sdk Name="Aspire.AppHost.Sdk" Version="13.6.5" />
     ```
 
 ## Non-.NET services
@@ -37,7 +37,7 @@ referenced by your AppHost alongside this one — see
 | --- | --- | --- |
 | `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
 | `java` | or `Aspire.Hosting.Java` (preview) | 13.6.1-preview.1 |
-| `javascript` | `Aspire.Hosting.JavaScript` | 13.6.1 |
+| `javascript` | `Aspire.Hosting.JavaScript` | 13.6.5 |
 
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources

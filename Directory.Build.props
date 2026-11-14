@@ -76,7 +76,7 @@
        before it did, this property floated while global.json's version stayed put, and the
        matrix built a mixed-version family (#116). -->
   <PropertyGroup>
-    <AspireVersion Condition="'$(AspireVersion)' == ''">13.6.1</AspireVersion>
+    <AspireVersion Condition="'$(AspireVersion)' == ''">13.6.5</AspireVersion>
   </PropertyGroup>
 
 </Project>
