@@ -1,7 +1,7 @@
 # Keeping a managed clone's git directory short on Windows (#479)
 
 **Date:** 2026-11-14
-**Status:** Draft
+**Status:** Approved
 **Resolves:** #479 (a managed `repository` clone is refused on Windows once the AppHost directory passes
 about 129 characters, because git cannot write a pack file past MAX_PATH).
 **Relates to:** #474 / #483 (the pack-path check), #477 (its refusal message), #488 (the repack temp file
@@ -154,7 +154,7 @@ Cleanup:
    directory, also removes every `*-<id>.git` child of the git root and its `.lock`. It never removes a git
    directory in the orphan-lock branch (`SweepOrphanLock`: a lock with no staging directory is the state
    after a successful move followed by a crash, where the git directory is live).
-2. **Orphans** *(provisional until Open Question 1 is answered)*: a new `SeparateGitDirectories.SweepOrphans`
+2. **Orphans** (retention decided, Open Question 1): a new `SeparateGitDirectories.SweepOrphans`
    runs at the same point (`CloneIntoPlace`, only for a clone that will use a separate git directory, so a
    shallow AppHost pays nothing). It enumerates direct children of the git root that match the strict
    pattern `^[0-9a-f]{16}-[0-9a-f]{8}\.git$` and are not reparse points, and for each:
@@ -185,14 +185,14 @@ Cleanup:
 Disk cost, stated plainly: each separate git directory is a full clone, and a worktree tool that makes a new
 deep path per task makes a new one per path, which stays until the retention window passes.
 
-**Retention (default 14 days) and whether the orphan sweep deletes at all are Open Question 1.** The plan treats
-rule 2's delete as provisional; everything else in D4 is decided.
+**Retention is 14 days** without a `lastUsedUtc` refresh, and the orphan sweep deletes (Open Question 1, resolved
+below). Everything in D4 is decided.
 
 ### D5. Existing checkouts and migration
 
 - A working in-place checkout is never touched. `PrepareRepoRoot` already returns an existing `.git`
   directory untouched, and D1 only decides for a new clone.
-- Decided (Open Question 2 only asks whether to go further): a deep checkout that already exists as an
+- Decided (Open Question 2, resolved below): a deep checkout that already exists as an
   in-place clone and now fails in `fetch`/`gc` is **not migrated automatically**. Moving a git directory under a developer's open IDE is a mutation of
   their working checkout, and `git init --separate-git-dir` on a repository whose own paths already
   exceed the limit is not something this package can promise to complete. Instead reconcile logs a notice
@@ -306,13 +306,10 @@ All new test classes carry `[Trait("IO", "true")]`; those where two clones, a sw
 
 ## 9. Open Questions
 
-1. **Retention of an unreferenced git directory (D4).** Recommendation: delete it after 14 days without a
-   refresh (disk is reclaimed without the user knowing it exists, and an in-use checkout keeps itself live
-   through the refresh). The alternative is never to delete automatically and only log a notice listing
-   the orphans and their size, which cannot lose anything but leaves disk to grow. The risk of deleting is
-   a checkout moved aside and then used only outside this tool for more than the window: its git history
-   would go. Which does the owner want, and what window?
-2. **Existing deep in-place checkouts (D5).** Recommendation: notice only, remedy is to delete and
-   re-clone. The alternative is an automatic `git init --separate-git-dir` migration. Decide if the extra
-   code and the risk of mutating a working checkout is worth it for a state that only arises for
-   checkouts cloned before #477.
+Both resolved by the owner; none remain open.
+
+1. **Retention of an unreferenced git directory (D4). Resolved:** the orphan sweep auto-deletes an unreferenced git
+   directory after 14 days without a `lastUsedUtc` refresh. An in-use checkout keeps itself live through the
+   refresh.
+2. **Existing deep in-place checkouts (D5). Resolved:** notice only; the remedy is to delete the checkout and
+   re-clone. There is no automatic migration.
