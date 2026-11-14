@@ -79,3 +79,49 @@ Set `scheme` in the developer config to override the catalog for just that devel
 }
 ```
 
+
+## Readiness and a dead tunnel
+
+The `kubectl port-forward` is a resource named after the service, and it is not treated as up just
+because the process started. Three things follow from that.
+
+**`WaitFor` holds until the tunnel works.** The service carries a built-in health check that opens a
+TCP connection to the local port the tunnel forwards. A consumer that `WaitFor`s the service starts
+once that connection is accepted, whether or not the AppHost adds a health check of its own. The probe
+repeats while the service runs, and `kubectl` logs each one as `Handling connection for <port>` in the
+service's console; that is the probe, not traffic. The probe opens and closes a connection without
+sending anything, so the pod behind the tunnel may see an empty connection each interval and a
+database may log it as an aborted or EOF connection.
+
+**A tunnel that fails to open is `FailedToStart`.** A Service name that does not exist in the
+namespace, a context that cannot authenticate, or a port the Service does not expose makes `kubectl`
+exit straight away. The service is then marked `FailedToStart`, so a consumer that `WaitFor`s it never
+starts, instead of starting against a port nothing listens on. It stays in `Waiting` in the dashboard:
+Aspire holds the dependent and does not fail it, so look at the service when a consumer never starts. The AppHost log carries the
+last line `kubectl` wrote (for example `services "orders-svc" not found`), and the full output is in the
+service's console in the dashboard. This is not retried: the causes are configuration, and a retry
+would fail the same way. Fix the Service name, namespace, context or port, and restart the resource.
+
+**A tunnel that dies after it was up is restarted, within limits.** When the pod behind the tunnel is
+replaced, a rollout happens or the connection drops, `kubectl port-forward` exits. The same resource is
+started again, so it keeps its name and its local port, after a wait of 1s, 2s, 4s and so on, never
+more than 30s. Each attempt is logged as a warning naming the attempt (`attempt 3 of 8`). After 8
+restarts in a row the tunnel is left stopped and an error is logged; start the resource from the
+dashboard once the cluster is reachable. A tunnel that stays up for 30s resets the count, and so does
+starting the resource yourself after it gave up. Starting it while a restart is waiting cancels that restart once it is up.
+
+A tunnel that is running but has not accepted a connection for 60s (typically a Service with no ready
+pods behind it, which leaves `kubectl` running with the port closed) is logged once as a warning with
+`kubectl`'s last line. It is not restarted, and a consumer that `WaitFor`s the service stays held.
+
+This is deliberately modest:
+
+- Nothing is restarted when the developer stops the resource, when the AppHost is shutting down, or
+  when `kubectl` could not be launched at all.
+- A restart does not carry over connections. Whatever was open through the old tunnel is gone, and a
+  consumer has to reconnect. A consumer that `WaitFor`s the service is not restarted or held back by
+  it going down; `WaitFor` only gates the first start.
+- The restart is Aspire's own Start command on the resource. A restart that is refused is logged and
+  counts against the 8.
+
+The retry limits are not configurable.

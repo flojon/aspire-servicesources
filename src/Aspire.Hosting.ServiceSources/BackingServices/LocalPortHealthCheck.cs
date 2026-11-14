@@ -30,8 +30,14 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <c>::1</c> first, connecting by name would try an address nothing is listening on and wait for
 /// that attempt to fail before falling back.
 /// </para>
+/// <para>
+/// Shared with the <c>"kubernetes"</c> service source (#490), where the same question decides when
+/// a consumer's <c>WaitFor</c> is released. <c>subject</c> is the only thing that differs: what the
+/// message calls the thing the tunnel belongs to.
+/// </para>
 /// </remarks>
-internal sealed class LocalPortHealthCheck(string backingServiceName, int port, string? portName = null)
+internal sealed class LocalPortHealthCheck(
+    string serviceName, int port, string? portName = null, string subject = "Backing service")
     : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -61,7 +67,7 @@ internal sealed class LocalPortHealthCheck(string backingServiceName, int port, 
             var which = portName is null ? "" : $" the port named {ConfiguredValue.Escaped(portName)} —";
 
             return HealthCheckResult.Unhealthy(
-                $"Backing service '{backingServiceName}':{which} nothing is listening on 127.0.0.1:{port} yet, so "
+                $"{subject} '{serviceName}':{which} nothing is listening on 127.0.0.1:{port} yet, so "
                 + "the kubectl port-forward has not come up. Its own resource carries kubectl's output.",
                 ex);
         }

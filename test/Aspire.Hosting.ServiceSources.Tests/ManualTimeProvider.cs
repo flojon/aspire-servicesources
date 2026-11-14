@@ -28,6 +28,18 @@ internal sealed class ManualTimeProvider : TimeProvider
         return timer;
     }
 
+    /// <summary>Timers that have been created and are waiting for a deadline.</summary>
+    public int PendingTimers
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _timers.Count(timer => timer.Due is not null);
+            }
+        }
+    }
+
     public void Advance(TimeSpan by)
     {
         List<ManualTimer> due;

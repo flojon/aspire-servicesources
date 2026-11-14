@@ -4,9 +4,13 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
+[Trait("IO", "true")]
 public class KubernetesSourceTests
 {
     private sealed class FakePortAllocator(int port) : IPortAllocator
@@ -201,6 +205,60 @@ public class KubernetesSourceTests
                 allocator, out _, out _));
 
         Assert.False(allocatorCalled);
+    }
+
+    /// <summary>
+    /// The tunnel carries a TCP health check, so a consumer's <c>WaitFor</c> holds until kubectl is
+    /// actually listening (#490). Without one the resource is <c>Running</c> as soon as the process
+    /// has started, before kubectl has resolved the Service or opened the tunnel.
+    /// </summary>
+    [Fact]
+    public void Resolve_TheTunnel_CarriesAHealthCheckThatIsRegisteredWithABoundedTimeout()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+
+        new KubernetesSource(new FakePortAllocator(54321))
+            .Resolve(builder, ServiceName, Definition(), DevConfig());
+
+        var real = builder.Resources.Single(resource => resource.Name == ServiceName);
+        var key = Assert.Single(real.Annotations.OfType<HealthCheckAnnotation>()).Key;
+
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == key);
+
+        Assert.NotEqual(Timeout.InfiniteTimeSpan, registration.Timeout);
+    }
+
+    [Fact]
+    public async Task Resolve_TheHealthCheck_ProbesTheLocalPortTheTunnelForwards()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+
+        new KubernetesSource(new FakePortAllocator(port))
+            .Resolve(builder, ServiceName, Definition(), DevConfig());
+
+        var key = builder.Resources.Single(resource => resource.Name == ServiceName)
+            .Annotations.OfType<HealthCheckAnnotation>().Single().Key;
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == key);
+        var check = registration.Factory(builder.Services.BuildServiceProvider());
+        var context = new HealthCheckContext { Registration = registration };
+
+        // Listening: healthy. Not listening (kubectl has not opened the tunnel, or has exited): not.
+        Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(context)).Status);
+
+        listener.Stop();
+
+        var down = await check.CheckHealthAsync(context);
+        Assert.Equal(HealthStatus.Unhealthy, down.Status);
+        Assert.Contains("'orders'", down.Description);
+        Assert.Contains(port.ToString(), down.Description);
+        Assert.DoesNotContain("Backing service", down.Description);
     }
 
     [Fact]

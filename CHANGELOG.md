@@ -65,6 +65,35 @@ never existed. Check the tag of the last release before adding one.
   `kubernetes:` entry with no `kubernetes.context` is not offered. The `path` remedy and the list of
   configuration layers that can set `source` are unchanged.
 
+- **A `"kubernetes"` tunnel that exits after it was up is restarted, with a backoff** ([#490]). Before,
+  a pod restart, a rollout or a dropped connection ended the `kubectl port-forward` for good and
+  everything referencing the service lost it for the rest of the run. Now the same resource is started
+  again after 1s, 2s, 4s … (at most 30s between attempts), logging each attempt, and left stopped with
+  an error line after 8 restarts in a row; a tunnel that then stays up for 30s resets the count, and
+  starting the resource yourself after it gave up does too. Starting it while a restart is waiting
+  cancels that restart once it is up. A tunnel that stays running but
+  unhealthy for 60s is logged once, with kubectl's last line. A tunnel that never came up,
+  one the developer stopped, and one that Aspire could not launch are not restarted. Consumers see
+  the same local port again but any connection open through the old tunnel is gone, so they must
+  reconnect. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
+
+### Fixed
+
+- **A `"kubernetes"` service no longer counts as ready before its port-forward works, and one that
+  fails to open is reported as failed** ([#490]). The service was `Running` as soon as the `kubectl`
+  process had started, so a consumer's `WaitFor` released it before kubectl had resolved the Service or
+  opened the tunnel: against a Service name that does not exist, the consumer started and failed to
+  connect while the tunnel's own resource finished with exit code 1. The service now carries a built-in
+  health check that connects to the tunnel's local port, so `WaitFor` holds until the tunnel accepts
+  connections. A port-forward that exits before that point is marked `FailedToStart` (with kubectl's last
+  line in the AppHost log), so a `WaitFor` dependent is held in `Waiting` instead of starting against a
+  dead endpoint (Aspire holds it; it does not fail it). The probe is a plain TCP connect, which kubectl logs as `Handling connection for <port>`
+  in the service's console. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
+
+- **The startup-failure notice for a `"kubernetes"` service that never launched now says why it
+  usually happens** ([#490]). When Aspire reports `FailedToStart` with no exit code, the AppHost log
+  adds that `kubectl` could not be launched and to check that it is installed and on the `PATH`.
+
 ## [0.8.0] - 2026-10-23
 
 ### Breaking
@@ -2159,5 +2188,6 @@ Targets `net10.0`.
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
 [#481]: https://github.com/flojon/aspire-servicesources/issues/481
+[#490]: https://github.com/flojon/aspire-servicesources/issues/490
 [#486]: https://github.com/flojon/aspire-servicesources/issues/486
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
