@@ -85,8 +85,8 @@ never existed. Check the tag of the last release before adding one.
   connect while the tunnel's own resource finished with exit code 1. The service now carries a built-in
   health check that connects to the tunnel's local port, so `WaitFor` holds until the tunnel accepts
   connections. A port-forward that exits before that point is marked `FailedToStart` (with kubectl's last
-  line in the AppHost log), so a `WaitFor` dependent fails with that reason instead of starting against a
-  dead endpoint. The probe is a plain TCP connect, which kubectl logs as `Handling connection for <port>`
+  line in the AppHost log), so a `WaitFor` dependent is held in `Waiting` instead of starting against a
+  dead endpoint (Aspire holds it; it does not fail it). The probe is a plain TCP connect, which kubectl logs as `Handling connection for <port>`
   in the service's console. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
 
 ## [0.8.0] - 2026-10-23

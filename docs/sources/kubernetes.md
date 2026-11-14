@@ -95,8 +95,9 @@ database may log it as an aborted or EOF connection.
 
 **A tunnel that fails to open is `FailedToStart`.** A Service name that does not exist in the
 namespace, a context that cannot authenticate, or a port the Service does not expose makes `kubectl`
-exit straight away. The service is then marked `FailedToStart`, so a consumer that `WaitFor`s it fails
-with that state instead of starting against a port nothing listens on. The AppHost log carries the
+exit straight away. The service is then marked `FailedToStart`, so a consumer that `WaitFor`s it never
+starts, instead of starting against a port nothing listens on. It stays in `Waiting` in the dashboard:
+Aspire holds the dependent and does not fail it, so look at the service when a consumer never starts. The AppHost log carries the
 last line `kubectl` wrote (for example `services "orders-svc" not found`), and the full output is in the
 service's console in the dashboard. This is not retried: the causes are configuration, and a retry
 would fail the same way. Fix the Service name, namespace, context or port, and restart the resource.

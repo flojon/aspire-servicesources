@@ -37,8 +37,8 @@ internal interface IPortForwardControl
 /// <c>Running</c> as soon as it has launched, so a Service that does not exist, a context that
 /// cannot authenticate and a port the Service does not expose all end in <c>Finished</c> with exit
 /// code 1 — Aspire's word for a program that ran and returned an error, not for a resource that
-/// never came up. This publishes <c>FailedToStart</c> instead, which is the state a consumer's
-/// <c>WaitFor</c> fails on with a reason, and logs kubectl's last line. These are configuration
+/// never came up. This publishes <c>FailedToStart</c> instead, which reads as a failure in the
+/// dashboard and keeps a consumer's <c>WaitFor</c> holding, and logs kubectl's last line. These are configuration
 /// errors that a retry reproduces, so the first one is final until the developer changes something
 /// and restarts the resource.
 /// </para>
