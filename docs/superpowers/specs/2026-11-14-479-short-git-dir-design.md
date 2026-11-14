@@ -54,8 +54,11 @@ ticket lists and corrects three claims it makes about the code:
   with git 2.52; the implementation must re-check them in its Windows test, because they are git
   behaviour this package does not control.
 
-So the feature raises the deepest usable AppHost directory from about 129 to about 190 characters
-(`235 - 45` for the staging directory), and a refusal remains beyond that (decision D1).
+So the feature raises the longest usable staging root from 174 to 235 characters. That is an AppHost
+directory of about 190 characters for a checkout name of 18 characters or fewer (`235 - 27 - 19`, where 27 is
+`\.servicesources\checkouts` and 19 is `\.incoming-<8 hex>`); a longer checkout name makes the final path the
+longer one and lowers it by the difference. A refusal remains beyond that (decision D1). The first
+warnings were seen at 250 and the first failure at 265, so 235 leaves about 15 characters of margin on purpose.
 
 ## 3. Decisions
 
@@ -85,7 +88,10 @@ The refusal stays a `ServiceSourcesConfigurationException`, still before anythin
 naming the length and how many characters to remove. Its content changes: it no longer cites the pack
 file, it cites the working-tree ceiling (`L > 235`), and the "move the AppHost" advice is the same. The
 235 is the largest staging root that was clean in section 2 with margin below the first warnings at 250.
-It is a constant (`MaxWorkingTreeRootLength`) with that measurement as its comment. When the git root is
+It is a constant (`MaxWorkingTreeRootLength`) with that measurement as its comment. `PackPathLimit` gains a
+second suffix, `LongestPackFileInGitDir` (`\objects\pack\.tmp-<10>-pack-<40>.pack`, 80 characters), built from the
+same pieces as `LongestPackFile` rather than hard-coding `\.git`; `PackPathLimitTests`, which assert 85 and
+174, are rewritten around the three-way decision, not merely extended. When the git root is
 unusable (D2) the message says so and gives today's pack-path numbers. Non-Windows behaviour is
 unchanged: no check, no separate git dir.
 
@@ -119,8 +125,11 @@ is renamed (`Directory.Move(scratch, repoRoot)`), which section 2 showed survive
 ### D3. Staging and the rename
 
 - `ScratchDirectory` owns the `.incoming-<id>` directory and its `.incoming-<id>.lock`. It gains an
-  optional sibling git directory with the same id, owned by the same lock, so there is one owner for the
-  pair and `Dispose` removes both (`Directory.Delete` of the git directory in the same `finally`).
+  optional paired git directory `<git root>\<hash>-<id>.git` and a second lock file `<hash>-<id>.git.lock` in
+  the **git root**, held open with no sharing for the same lifetime, so a sweep run from any other AppHost
+  can tell a clone in progress from an abandoned one. `Dispose` removes the pair and both locks. If the
+  reference-checkout retry in `CloneIntoPlace` disposes and recreates the scratch, the new attempt has a new
+  id and so a new git directory name, computed from that id.
 - On success the working tree moves and the git directory stays. Disposal must therefore be told the git
   directory was adopted (so it removes it only when the clone was abandoned: concurrent loser, failed
   clone, failed move).
@@ -140,39 +149,51 @@ Each separate git directory carries `servicesources-owner.json`:
 A git directory is **live** when the `.git` file at `checkout` resolves (D6 rules) to that directory.
 Cleanup:
 
-1. **Abandoned staging:** `ScratchDirectory.SweepAbandoned` already removes `.incoming-*` whose lock is
-   free. It also removes the paired git directory (same id) and its leftover lock. Nothing else in the git
-   root is touched by this step.
-2. **Orphans:** a new `SeparateGitDirectories.SweepOrphans` runs at the same point (`CloneIntoPlace`,
-   only on a clone that is going to use a separate git directory, so an AppHost on a shallow path pays
-   nothing). It enumerates direct children of the git root whose name matches the strict pattern
-   `^[0-9a-f]{16}-[0-9a-f]{8}\.git$` and, for each:
-   - skip it when its `.lock` is held (a clone in progress);
-   - skip it when it is live;
-   - skip it when the drive root of `checkout` does not exist (an unplugged or unmounted volume is not a
-     deleted checkout);
-   - skip it when `lastUsedUtc` is within the retention window;
-   - otherwise delete it recursively and log one line to the clone's progress sink, like the staging
-     sweep does.
-3. **Refresh:** a live git directory's `lastUsedUtc` is rewritten when it is more than one day old, at
-   reconcile (`UseExistingCheckout`). That is why a checkout the developer moved aside or whose AppHost
-   moved is not swept while it is in use through this tool.
-4. **Re-clone of a path:** nothing special. The old git directory belongs to a checkout that no longer
-   exists or no longer points at it, so rule 2 collects it after the retention window.
+1. **Abandoned staging:** `ScratchDirectory.SweepAbandoned` already removes `.incoming-*` directories whose
+   lock is free. It takes the git root and, in the branch where it removes an existing `.incoming-<id>`
+   directory, also removes every `*-<id>.git` child of the git root and its `.lock`. It never removes a git
+   directory in the orphan-lock branch (`SweepOrphanLock`: a lock with no staging directory is the state
+   after a successful move followed by a crash, where the git directory is live).
+2. **Orphans** *(provisional until Open Question 1 is answered)*: a new `SeparateGitDirectories.SweepOrphans`
+   runs at the same point (`CloneIntoPlace`, only for a clone that will use a separate git directory, so a
+   shallow AppHost pays nothing). It enumerates direct children of the git root that match the strict
+   pattern `^[0-9a-f]{16}-[0-9a-f]{8}\.git$` and are not reparse points, and for each:
+   - skip it when its git-root `.lock` exists and cannot be opened exclusively (a clone in progress, in any
+     AppHost); a lock that can be opened is stale and is removed with that child;
+   - skip it when it is live (D6 resolves from the recorded checkout back to it);
+   - skip it when the recorded checkout's drive root does not exist, and when the recorded path is not a
+     rooted local path (a UNC or relative value is never probed);
+   - with a parsable record: skip it while `lastUsedUtc` is within the retention window;
+   - with no record or an unparsable one: skip it while the directory's own last-write time is within the
+     retention window. Afterwards it is deletable, which is safe because D6 can never adopt such a
+     directory;
+   - otherwise delete it recursively (never following a reparse point, never with a path taken from the
+     record) and log one line to the clone's progress sink, like the staging sweep does.
+3. **Refresh:** a live git directory's `lastUsedUtc` is rewritten when more than a day old, at reconcile
+   (`UseExistingCheckout`). The record is always written to a temp file and moved over the old one, so a
+   concurrent reader sees a whole record or the old one. This keeps a checkout in use through this tool
+   from being swept. A checkout whose AppHost directory is **moved or renamed** is not re-adopted (D6 rule
+   4); see there.
+4. **Re-clone of a path:** nothing special. The old git directory no longer resolves from its checkout, so
+   rule 2 collects it after the retention window.
 5. **Checkout deleted by the tool:** the tool deletes a checkout directory in exactly one place
    (`CloneIntoPlace` removing debris with no `.git` entry). A directory with no `.git` has no git
-   directory, so this path has nothing to clean.
+   directory, so there is nothing to clean there.
 6. **Best effort:** every sweep step swallows `IOException` and `UnauthorizedAccessException`, like
    `ScratchDirectory.SweepAbandoned`. A sweep must never fail resolution.
 
-**Retention (default 14 days, product choice): see Open Questions.**
+Disk cost, stated plainly: each separate git directory is a full clone, and a worktree tool that makes a new
+deep path per task makes a new one per path, which stays until the retention window passes.
+
+**Retention (default 14 days) and whether the orphan sweep deletes at all are Open Question 1.** The plan treats
+rule 2's delete as provisional; everything else in D4 is decided.
 
 ### D5. Existing checkouts and migration
 
 - A working in-place checkout is never touched. `PrepareRepoRoot` already returns an existing `.git`
   directory untouched, and D1 only decides for a new clone.
-- A deep checkout that already exists as an in-place clone and now fails in `fetch`/`gc`
-  is **not migrated automatically**. Moving a git directory under a developer's open IDE is a mutation of
+- Decided (Open Question 2 only asks whether to go further): a deep checkout that already exists as an
+  in-place clone and now fails in `fetch`/`gc` is **not migrated automatically**. Moving a git directory under a developer's open IDE is a mutation of
   their working checkout, and `git init --separate-git-dir` on a repository whose own paths already
   exceed the limit is not something this package can promise to complete. Instead reconcile logs a notice
   when it finds an in-place checkout whose pack path would not fit (`PackPathLimit` on its path),
@@ -194,14 +215,20 @@ git directory for either shape:
   2. the target, made absolute (git writes forward slashes) and normalised, is a **direct child** of the
      git root (no `..`, compared case-insensitively on Windows) and its name matches the strict pattern
      from D4;
-  3. the target is a real directory and neither it nor the git root is a reparse point;
+  3. the target is a real directory and none of it, the git root and the git root's ancestors up to
+     `LocalApplicationData` is a reparse point (above that is the user's own profile, inside the trust boundary);
   4. its `servicesources-owner.json` parses and its `checkout` equals `repoRoot` (same comparison).
-  Anything else returns `null`, and the caller keeps today's refusal for a `.git` file. A `.git` file that
-  satisfies 1-3 but whose git directory is gone gets a more specific message (the git directory is
-  missing; delete the checkout and re-run).
+  Anything else returns `null`, and the caller keeps today's refusal for a `.git` file, with a message naming
+  the specific reason: a record naming another checkout path (the AppHost directory or worktree was moved or
+  renamed, so the checkout is refused rather than re-adopted: delete it and re-run), an unreadable record, a
+  target outside this machine's git root (another Windows account, an elevated process, a different
+  `LOCALAPPDATA`, or WSL: the message names both roots), or a git directory that is gone.
 
 The resolver is the single place that answers "is this `.git` entry one of ours", and every site in
 section 5 calls it instead of testing `Directory.Exists(.git)`.
+
+When the git root is unusable (D2), a checkout that already exists as a separate git directory still resolves
+if rules 1-4 hold; the root is only a requirement for creating one.
 
 ## 4. Attack surface
 
@@ -219,6 +246,9 @@ a file inside a checkout to decide where git runs. Each trust edge:
 | `.git` entry no longer inside `.servicesources` | `.servicesources\.gitignore` and the `CheckoutBuildBarrier` files protect the AppHost repository from checkouts. | Not affected: the working tree stays under `.servicesources`. A git directory outside it cannot show in the AppHost's status. |
 | Borrowing objects (`--reference`) from the home worktree's checkout | Objects come from a directory this tool does not control. | `ReferenceCheckout` resolves through D6 (or an in-place `.git` directory) and still requires an origin match. A `.git` file that D6 rejects means "do not borrow", not an error. |
 
+Delete helpers that clear read-only attributes are only ever handed a path confirmed, by the strict name
+pattern, to be a direct child of the git root.
+
 Nothing here executes content from the new directories beyond what git itself already executes from a
 clone's `.git`, and the owner record is parsed with `System.Text.Json` into a record, like
 `PrepareMarker`.
@@ -231,10 +261,10 @@ All sites found by searching `.git` in `src/Aspire.Hosting.ServiceSources`:
 |---|---|---|
 | `LocalGitCheckout.PrepareRepoRoot` (existing checkout test) | `Directory.Exists(.git)` | `Resolve(repoRoot) is not null`, so a managed separate checkout is adopted like any existing one |
 | `CloneIntoPlace` `.git` file refusal | any `.git` file refused | refuse only when `Resolve` is null; message for the git-dir-missing case |
-| `CloneIntoPlace` concurrent-winner checks (two places) and the debris check before `Directory.Delete` | `Directory.Exists(.git)` | same helper; a `.git` file that is not ours is never deleted (kept refusal) |
-| `LocalGitCheckout.ReferenceCheckout` | `.git` directory only, because git refuses a linked-worktree reference | accept in place `.git` directory, or `Resolve` result; pass the resolved git directory to `--reference-if-able`. A separate git directory is a full repository, not a linked worktree |
-| `PrepareMarker.LocationFor` (managed) | `repoRoot\.git\servicesources-prepare.json` | `Resolve(repoRoot) ?? repoRoot\.git`, then the same file name. The marker moves with the git directory, so a re-cloned checkout still starts without a marker (new id) |
-| `GitCliClient.GetHeadCommitSha` | accepts a `.git` file already | none (comment already names the shape) |
+| `CloneIntoPlace` post-clone check (it also guards the debris `Directory.Delete`) and the post-`Move` check | `Directory.Exists(.git)` at two places | same helper; a `.git` file that is not ours is never deleted (kept refusal) |
+| `LocalGitCheckout.ReferenceCheckout` | `.git` directory only, because git refuses a linked-worktree reference | accept an in-place `.git` directory, or a `Resolve` result; pass the resolved git directory to `--reference-if-able`. The ticket suggests `git rev-parse --git-dir`; `Resolve` is used instead because it avoids running git on a `.git` file nobody has vetted. A separate git directory is a full repository, not a linked worktree |
+| `PrepareMarker.LocationFor` (managed) | `repoRoot\.git\servicesources-prepare.json` | the resolved git directory, or `repoRoot\.git` when that is a directory. When `.git` is a file `Resolve` rejects there is no marker location: `Read` returns null and `Write` is skipped (already best effort), so the step just runs. `LocationFor` gains one small file read. The marker moves with the git directory, so a re-cloned checkout starts without one (new id). The `PrepareMarker` doc comment and the comment above the `.git`-file refusal in `CloneIntoPlace` call a `.git` file a shape this tool refuses and are updated |
+| `GitCliClient.GetHeadCommitSha` | accepts a `.git` directory or file | none: it is only reached after `PrepareRepoRoot` has run `Resolve` (`CheckoutPreparation` decides after reconcile). No git command runs in a `.git`-file checkout before `Resolve` accepts it; that is enforced in `PrepareRepoRoot`, not in the clients |
 | `UseExistingCheckout` / `Checkout` / `Fetch` / `GetOriginUrl` | `git -C <checkout>` | none; git follows the `.git` file |
 | `PathSource` / `WorktreeHome` | accept a `.git` file | none; they find the AppHost's repository, not a managed checkout |
 | `PackPathLimit` | the only check | split into "fits in place" and "ceiling", D1 |
@@ -258,7 +288,8 @@ any non-Windows behaviour; any public API (nothing in `PublicAPI.Unshipped.txt`)
 
 ## 8. Testing
 
-All new test classes carry `[Trait("IO", "true")]`.
+All new test classes carry `[Trait("IO", "true")]`; those where two clones, a sweep and `Resolve` race
+(two AppHosts on one final path) also carry `Concurrency`.
 
 - Cross-platform, runs on Linux CI: a decision seam `CloneLayout` (in place or separate, from lengths and
   a git root) with a table test of D1; the separate layout is forced by injection, so the clone, adoption,
