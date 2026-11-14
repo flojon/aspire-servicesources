@@ -1,7 +1,7 @@
 # Letting a health check reach a `"kubernetes"` service's port-forward (#399)
 
 **Date:** 2026-11-14
-**Status:** Draft
+**Status:** Approved (the four open questions were answered by the human; recorded in section 7)
 **Resolves:** #399 (`WithHttpHealthCheck` is skipped for a `"kubernetes"`-sourced service although the
 port-forward has a real local endpoint).
 **Relates to:** #490 / PR #512 (the built-in TCP check and the port-forward supervisor that this
@@ -147,7 +147,7 @@ the user's check, which is what the author asked for.
 `service.WithHttpHealthCheck("/healthz")` on a `"kubernetes"` service now applies: a
 `HealthCheckAnnotation` with key `"{service}_{scheme}_/healthz_200_check"` is on the real resource, and
 `WaitFor(service)` holds until both the TCP check and the HTTP check pass. `WithHealthCheck(key)` with a
-user-registered check applies too (section 7, Q2).
+user-registered check applies too (section 7, decision 2).
 
 ## 5. Attack surface this design creates
 
@@ -160,19 +160,19 @@ port, scheme). Nothing here accepts input from the network or from the cluster b
    response can only keep a consumer waiting (unhealthy) or release it (healthy); it cannot change what is
    configured. Worst case is a held or prematurely released consumer, the same trust as `WaitFor` on the TCP
    check from #490, plus the HTTP status.
-2. **Redirects and absolute paths** (see Q4). `EndpointUriHealthCheck` builds `new Uri(baseUri, path)`, so an absolute
+2. **Redirects and absolute paths** (see section 7, decision 4). `EndpointUriHealthCheck` builds `new Uri(baseUri, path)`, so an absolute
    or scheme-relative `path` argument retargets the probe to another host, and an HTTP redirect from the
    cluster service goes wherever the handler follows it (default `HttpClient` handler; **[verify]** redirect
    behaviour in 13.6.x). The first is the AppHost author's own argument (same as any Aspire resource); the
    second is new for this package because the response comes from a remote system: a compromised or
    hostile workload could redirect the unauthenticated GET from the developer's machine to an internal or
    metadata address and have the resulting 200 release dependents (blind SSRF). A mitigation exists
-   (configure the named client with `AllowAutoRedirect = false`) but touches Aspire's client; it is Q4.
+   (configure the named client with `AllowAutoRedirect = false`) but touches Aspire's client; it was declined (section 7, decision 4).
 3. **TLS.** For `scheme: https` the tunnel is byte-transparent, so the certificate is the pod's and the
    host name is `localhost` (`EndpointScheme` remarks). The default probe will reject it unless the
    cluster certificate is trusted for `localhost`, leaving the service unhealthy and every `WaitFor`
    holding. We must **not** relax certificate validation to make this work: that would turn a probe of a
-   remote system into an unauthenticated one with no way for the developer to see it. See Q1.
+   remote system into an unauthenticated one with no way for the developer to see it. See section 7, decision 1.
 4. **Probe traffic against a remote service, in whichever cluster is selected.** The context comes from
    `servicesources.local.json`, so a developer switching a service to `"kubernetes"` turns a checked-in,
    previously skipped `WithHttpHealthCheck` into a live GET against whatever context they named, possibly a
@@ -222,32 +222,20 @@ kubernetes allowance only if (a) it is data the real resource or Aspire consumes
 to the kubectl process, (b) acting on the real resource measures or orders the service behind the tunnel,
 and (c) no invariant elsewhere in this package assumes it is unreachable.
 
-## 7. Open questions
+## 7. Decisions (the former open questions, answered by the human)
 
-1. **Q1: `scheme: https`.** A default `WithHttpHealthCheck` against an `https` tunnel will almost
-   certainly be `Unhealthy` for a cluster with a self-signed or non-`localhost` certificate, so
-   `WaitFor` holds forever. Options: (a) document it in `docs/sources/kubernetes.md`, nothing else;
-   (b) also log a startup notice for an applied check on an `https` service (needs a new notice hook:
-   `ServiceSourcesWarnings` has only a skip channel for annotations, so this is added scope); (c) refuse the
-   call on `https`. The design recommends (a) only, with (b) as a follow-up ticket; it rules out any option
-   that relaxes certificate validation.
-2. **Q2: breadth of the type.** Keying on `HealthCheckAnnotation` also admits `WithHealthCheck(key)`
-   with an arbitrary user-registered check, not only `WithHttpHealthCheck`. Annotation type is the only
-   thing the gate sees, so narrowing to HTTP checks would need a shadow `WithHttpHealthCheck` overload
-   (new public API, and invisible to guest-language AppHosts, which the mutation detector was built to
-   cover). The design leans to accepting the wider type (a custom check is AppHost code of the same
-   trust, it measures rather than configures, and the supervisor fix protects the tunnel), but it is wider
-   than the ticket's `WithHttpHealthCheck` and sections 1 and 4.4 assume it; a "no" changes them. Confirm.
-3. **Q3 (scope, for confirmation): not extending to other endpoint-targeting annotations.** The ticket
-   asks whether the class can be special-cased. This design says no and handles only
-   `HealthCheckAnnotation` (section 5, item 6). If the human wants `WithHttpCommand` or dashboard URLs
-   for kubernetes services, each needs its own spec.
-
-4. **Q4: redirects.** Configure the health check's named `HttpClient` (key from the annotation) with
-   `AllowAutoRedirect = false` when a `HealthCheckAnnotation` is accepted on a kubernetes service? Pro:
-   closes the SSRF in section 5 item 2. Con: reaches into Aspire's client for a key we do not choose, only
-   works for HTTP checks, and a service that legitimately redirects `/` would then report unhealthy.
-   Recommendation: document the residual risk, no code. Confirm.
+1. **`scheme: https`: document the limitation only.** No startup notice, no refusal. Certificate
+   validation is never relaxed. `docs/sources/kubernetes.md` says that a default `WithHttpHealthCheck`
+   against an `https` tunnel is `Unhealthy` unless the cluster certificate is trusted for `localhost`,
+   and that `WaitFor` then holds.
+2. **Breadth of the type: accept the wider type.** Any `HealthCheckAnnotation` of exact `Type` is
+   admitted, including `WithHealthCheck(key)` with a user-registered check. No shadow
+   `WithHttpHealthCheck` overload, no new public API.
+3. **Scope: only `HealthCheckAnnotation`.** `WithHttpCommand`, probe and URL annotations stay gated; each
+   would need its own spec.
+4. **Redirects: document the residual risk, no code.** No `AllowAutoRedirect = false`. The docs state that
+   the probe follows Aspire's default redirect handling and that a hostile workload behind a tunnel could
+   redirect it (section 5, item 2).
 
 ## 8. Test plan (outline, for the Plan step)
 
