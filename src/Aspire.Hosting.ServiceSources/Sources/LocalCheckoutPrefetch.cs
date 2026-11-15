@@ -144,6 +144,9 @@ internal sealed class LocalCheckoutPrefetch
     // WorktreeHome caches per builder, so concurrent clones share one resolution.
     private Func<string?>? _homeAppHostDirectory;
 
+    // Reconciling runs after a checkout's progress stream has ended, so a notice has to go to the buffered warnings.
+    private Action<Raw>? _notice;
+
     public static LocalCheckoutPrefetch For(
         IDistributedApplicationBuilder builder, IGitClient gitClient)
     {
@@ -184,6 +187,8 @@ internal sealed class LocalCheckoutPrefetch
             _started = true;
             _isRunMode = builder.ExecutionContext.IsRunMode;
             _homeAppHostDirectory = () => WorktreeHome.TryResolve(builder)?.AppHostDirectory;
+            var warnings = ServiceSourcesWarnings.For(builder);
+            _notice = warnings.AddNotice;
 
             // Buffered to BeforeStartEvent for the same reason ServiceSourcesWarnings is:
             // AddService() runs while the AppHost is still being composed, before there is an
@@ -640,7 +645,7 @@ internal sealed class LocalCheckoutPrefetch
             }
 
             return LocalGitCheckout.ReconcileRepoRoot(
-                serviceName, definition, config, repositoryConfig, prepared, gitClient);
+                serviceName, definition, config, repositoryConfig, prepared, gitClient, notice: _notice);
         }
 
         // Waits on this service's checkout only. The other prefetched checkouts keep running in the
@@ -659,7 +664,7 @@ internal sealed class LocalCheckoutPrefetch
         // mutates a working tree, so it happens here — on the thread of the AddService call that
         // asked for this service, and never for a service the AppHost turns out not to add.
         return LocalGitCheckout.ReconcileRepoRoot(
-            serviceName, definition, config, repositoryConfig, result.Checkout!.Value, gitClient);
+            serviceName, definition, config, repositoryConfig, result.Checkout!.Value, gitClient, notice: _notice);
     }
 
     private void Run(IDistributedApplicationBuilder builder, IGitClient gitClient)

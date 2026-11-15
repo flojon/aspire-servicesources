@@ -32,7 +32,8 @@ internal sealed record PrepareMarker(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A managed checkout keeps it inside its own <c>.git</c>. It is invisible to the service
+    /// A managed checkout keeps it inside its own git directory: <c>.git</c>, or the separate git
+    /// directory its <c>.git</c> file names when this tool made it. It is invisible to the service
     /// repository's <c>git status</c>, so it cannot be mistaken for the developer's own file or
     /// accidentally committed, and it dies with the checkout — so a deleted-and-recloned checkout
     /// re-prepares even at the same commit, which a marker stored beside the checkout would get
@@ -43,9 +44,10 @@ internal sealed record PrepareMarker(
     /// <para>
     /// A <c>path</c> checkout gets neither, and the part that is available would be unwelcome.
     /// <c>.git</c> is a <em>file</em> rather than a directory for a linked worktree and for a
-    /// <c>--separate-git-dir</c> clone — the two shapes <c>CloneIntoPlace</c> refuses for managed
-    /// checkouts, telling the developer to point <c>repository.path</c> at it, so the tool's own
-    /// documented remedy produces exactly the shape a <c>.git</c> marker cannot handle. And writing
+    /// <c>--separate-git-dir</c> clone the tool did not make — the shapes <c>CloneIntoPlace</c>
+    /// refuses for managed checkouts, telling the developer to point <c>repository.path</c> at it,
+    /// so the tool's own documented remedy produces exactly the shape a <c>.git</c> marker cannot
+    /// handle. And writing
     /// into a directory the tool does not own is the one thing <c>path</c> exists to promise it will
     /// never do. So it goes in the tool's own tree, keyed on the resolved absolute path as well as
     /// the command: re-pointing <c>path</c> elsewhere invalidates it, and two services sharing one
@@ -63,12 +65,21 @@ internal sealed record PrepareMarker(
     /// which is the harm #224 is about. The managed branch needs no check: <paramref name="repoRoot"/>
     /// came from <c>ManagedRepoRoot</c>, which has already refused it.
     /// </exception>
-    public static string LocationFor(
-        string serviceName, string repoRoot, string appHostDirectory, bool managedCheckout)
+    public static string? LocationFor(
+        string serviceName, string repoRoot, string appHostDirectory, bool managedCheckout, string? gitRoot = null)
     {
         if (managedCheckout)
         {
-            return System.IO.Path.Combine(repoRoot, ".git", FileNameInGitDirectory);
+            var dotGit = System.IO.Path.Combine(repoRoot, ".git");
+            if (!File.Exists(dotGit))
+            {
+                return System.IO.Path.Combine(dotGit, FileNameInGitDirectory);
+            }
+
+            // A separate git directory this tool made; any other '.git' file has no place to keep one.
+            return Git.ManagedGitDirectory.Resolve(repoRoot, gitRoot ?? Git.SeparateGitDirectories.DefaultRoot()).GitDirectory is { } gitDirectory
+                ? System.IO.Path.Combine(gitDirectory, FileNameInGitDirectory)
+                : null;
         }
 
         if (!Git.LocalGitCheckout.IsContainedCheckoutDirectoryName(serviceName))

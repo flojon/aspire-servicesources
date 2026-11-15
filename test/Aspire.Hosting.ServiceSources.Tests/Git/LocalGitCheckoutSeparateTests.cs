@@ -46,13 +46,13 @@ public class LocalGitCheckoutSeparateTests
 
     internal static string OriginUrl() => new Uri(TestRepository.CreateOrigin().Path).AbsoluteUri;
 
-    internal static LocalGitCheckout.PreparedCheckout Prepare(
+    internal static LocalGitCheckout.PreparedCheckout PrepareManaged(
         Environment environment, IGitClient git, string url, Func<string?>? home = null) =>
         LocalGitCheckout.PrepareRepoRoot(
             "orders", Definition(url), DevConfig(), repositoryConfig: null, environment.AppHost, git,
             progress: null, home, environment.Layout);
 
-    private static GitCliClient RealGit() => new(TestRepository.IsolatedEnvironment());
+    internal static GitCliClient RealGit() => new(TestRepository.IsolatedEnvironment());
 
     /// <summary>Forwards to a real git, counting clones and optionally acting once one has landed.</summary>
     internal sealed class RecordingGitClient(IGitClient inner) : IGitClient
@@ -60,6 +60,17 @@ public class LocalGitCheckoutSeparateTests
         public int Clones { get; private set; }
 
         public Action<string>? AfterClone { get; init; }
+
+        public List<string> References { get; } = [];
+
+        public void CloneWithReference(
+            string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null,
+            string? separateGitDir = null)
+        {
+            References.Add(referenceRepository);
+            Clones++;
+            inner.CloneWithReference(repositoryUrl, destinationPath, referenceRepository, progress, separateGitDir);
+        }
 
         public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
@@ -84,7 +95,7 @@ public class LocalGitCheckoutSeparateTests
     {
         var environment = NewEnvironment();
 
-        var prepared = Prepare(environment, RealGit(), OriginUrl());
+        var prepared = PrepareManaged(environment, RealGit(), OriginUrl());
 
         Assert.False(prepared.NeedsReconciliation);
         Assert.True(File.Exists(Path.Combine(environment.Checkout, ".git")));
@@ -101,7 +112,7 @@ public class LocalGitCheckoutSeparateTests
     {
         var environment = NewEnvironment();
 
-        Prepare(environment, RealGit(), OriginUrl());
+        PrepareManaged(environment, RealGit(), OriginUrl());
 
         var owner = ManagedGitDirectory.ReadOwner(Assert.Single(environment.GitDirectories));
         Assert.NotNull(owner);
@@ -114,7 +125,7 @@ public class LocalGitCheckoutSeparateTests
         var environment = NewEnvironment();
         var missing = new Uri(Path.Combine(TempDirectories.CreateSubdirectory().FullName, "no-such-origin")).AbsoluteUri;
 
-        Assert.Throws<ServiceSourcesConfigurationException>(() => Prepare(environment, RealGit(), missing));
+        Assert.Throws<ServiceSourcesConfigurationException>(() => PrepareManaged(environment, RealGit(), missing));
 
         Assert.Empty(Directory.GetFileSystemEntries(environment.GitRoot));
     }
@@ -126,7 +137,7 @@ public class LocalGitCheckoutSeparateTests
         Directory.CreateDirectory(Path.GetDirectoryName(environment.Checkout)!);
         File.WriteAllText(environment.Checkout, "in the way");
 
-        Assert.Throws<ServiceSourcesConfigurationException>(() => Prepare(environment, RealGit(), OriginUrl()));
+        Assert.Throws<ServiceSourcesConfigurationException>(() => PrepareManaged(environment, RealGit(), OriginUrl()));
 
         Assert.Empty(Directory.GetFileSystemEntries(environment.GitRoot));
     }
@@ -137,9 +148,9 @@ public class LocalGitCheckoutSeparateTests
         var environment = NewEnvironment();
         var git = new RecordingGitClient(RealGit());
         var url = OriginUrl();
-        Prepare(environment, git, url);
+        PrepareManaged(environment, git, url);
 
-        var second = Prepare(environment, git, url);
+        var second = PrepareManaged(environment, git, url);
 
         Assert.True(second.NeedsReconciliation);
         Assert.Equal(1, git.Clones);
@@ -153,7 +164,7 @@ public class LocalGitCheckoutSeparateTests
         File.WriteAllText(Path.Combine(environment.Checkout, ".git"), "gitdir: elsewhere");
         var git = new RecordingGitClient(RealGit());
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Prepare(environment, git, OriginUrl()));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => PrepareManaged(environment, git, OriginUrl()));
 
         Assert.Contains("'.git' file", ex.Message, StringComparison.Ordinal);
         Assert.Contains("absolute git directory", ex.Message, StringComparison.Ordinal);
@@ -168,7 +179,7 @@ public class LocalGitCheckoutSeparateTests
         Directory.CreateDirectory(environment.Checkout);
         File.WriteAllText(Path.Combine(environment.Checkout, "stale.txt"), "debris");
 
-        Prepare(environment, RealGit(), OriginUrl());
+        PrepareManaged(environment, RealGit(), OriginUrl());
 
         Assert.False(File.Exists(Path.Combine(environment.Checkout, "stale.txt")));
         Assert.True(File.Exists(Path.Combine(environment.Checkout, ".git")));
@@ -189,7 +200,7 @@ public class LocalGitCheckoutSeparateTests
             },
         };
 
-        Assert.Throws<ServiceSourcesConfigurationException>(() => Prepare(environment, git, OriginUrl()));
+        Assert.Throws<ServiceSourcesConfigurationException>(() => PrepareManaged(environment, git, OriginUrl()));
 
         Assert.Equal("their work", File.ReadAllText(Path.Combine(environment.Checkout, "theirs.txt")));
         Assert.Empty(Directory.GetFileSystemEntries(environment.GitRoot));
@@ -206,7 +217,7 @@ public class LocalGitCheckoutSeparateTests
         var ancient = DateTimeOffset.UtcNow - TimeSpan.FromDays(90);
         ManagedGitDirectory.WriteOwner(orphan, new OwnerRecord(Path.Combine(environment.AppHost, "gone"), ancient, ancient));
 
-        Prepare(environment, RealGit(), OriginUrl());
+        PrepareManaged(environment, RealGit(), OriginUrl());
 
         Assert.Equal(orphanSurvives, Directory.Exists(orphan));
     }
@@ -224,7 +235,7 @@ public class LocalGitCheckoutSeparateTests
                 $"alternate object failure", GitCommandFailedException.For($"alternate object failure")),
         };
 
-        Prepare(environment, git, FakeUrl, () => home);
+        PrepareManaged(environment, git, FakeUrl, () => home);
 
         var attempts = git.SeparateGitDirs;
         Assert.Equal(2, attempts.Count);
@@ -242,7 +253,7 @@ public class LocalGitCheckoutSeparateTests
         var environment = new Environment(appHost, Path.Combine(temp, "gitroot"), new CloneLayoutOptions(Path.Combine(temp, "gitroot"), IsWindows: true));
         var git = new RecordingGitClient(RealGit());
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Prepare(environment, git, OriginUrl()));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => PrepareManaged(environment, git, OriginUrl()));
 
         Assert.Contains("characters shorter", ex.Message, StringComparison.Ordinal);
         Assert.Equal(0, git.Clones);
@@ -263,7 +274,7 @@ public class LocalGitCheckoutSeparateRaceTests
         await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
         {
             barrier.SignalAndWait();
-            LocalGitCheckoutSeparateTests.Prepare(environment, new GitCliClient(TestRepository.IsolatedEnvironment()), url);
+            LocalGitCheckoutSeparateTests.PrepareManaged(environment, new GitCliClient(TestRepository.IsolatedEnvironment()), url);
         })));
 
         var gitDirectory = Assert.Single(environment.GitDirectories);

@@ -1242,4 +1242,22 @@ public class CheckoutPreparationTests
             Path.Combine("/repo", ".git", "servicesources-prepare.json"),
             PrepareMarker.LocationFor(ServiceName, "/repo", "/unused", managedCheckout: true));
     }
+
+    /// <summary>
+    /// A '.git' file this tool did not write has no marker location, so the step simply runs every
+    /// time rather than writing into a git directory nobody vetted.
+    /// </summary>
+    [Fact]
+    public void Decide_RejectedGitFile_RunsStepAndWritesNoMarker()
+    {
+        var fixture = NewFixture();
+        Directory.Delete(Path.Combine(fixture.RepoRoot, ".git"));
+        File.WriteAllText(Path.Combine(fixture.RepoRoot, ".git"), "gitdir: elsewhere");
+
+        Run(fixture, Step());
+        Run(fixture, Step());
+
+        Assert.Equal(2, fixture.Runner.Runs.Count);
+        Assert.Equal([".git"], Directory.GetFileSystemEntries(fixture.RepoRoot).Select(Path.GetFileName));
+    }
 }

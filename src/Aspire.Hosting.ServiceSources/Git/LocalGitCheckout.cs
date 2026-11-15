@@ -408,16 +408,43 @@ internal static class LocalGitCheckout
         ServiceDeveloperConfig config,
         RepositoryDeveloperConfig? repositoryConfig,
         PreparedCheckout prepared,
-        IGitClient gitClient)
+        IGitClient gitClient,
+        CloneLayoutOptions? layout = null,
+        Action<Raw>? notice = null)
     {
         if (prepared.NeedsReconciliation)
         {
+            NoteExistingCheckout(prepared.RepoRoot, layout ?? CloneLayoutOptions.Default, notice);
             UseExistingCheckout(
                 serviceName, definition, prepared.RepoRoot,
                 ConfiguredReference(definition, config, repositoryConfig), gitClient);
         }
 
         return prepared.RepoRoot;
+    }
+
+    /// <summary>
+    /// Keeps a separate git directory in use from being swept, and says so when an in-place checkout
+    /// is too deep to be maintained, which this tool never fixes by moving a working checkout.
+    /// </summary>
+    private static void NoteExistingCheckout(string repoRoot, CloneLayoutOptions layout, Action<Raw>? notice)
+    {
+        if (Directory.Exists(Path.Combine(repoRoot, ".git")))
+        {
+            if ((layout.IsWindows ?? OperatingSystem.IsWindows())
+                && PackPathLimit.Required(repoRoot, repoRoot, out _) > PackPathLimit.MaxPathLength)
+            {
+                notice?.Invoke(Raw.Compose(
+                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows to repack there, so a fetch or gc may fail with 'Filename too long'. It is not moved: delete '{Raw.Display(Path.Combine("checkouts", Path.GetFileName(repoRoot)))}' under the AppHost's '.servicesources' directory and re-run to have it cloned again with a short separate git directory."));
+            }
+
+            return;
+        }
+
+        if (ManagedGitDirectory.Resolve(repoRoot, layout.GitRoot).GitDirectory is { } gitDirectory)
+        {
+            SeparateGitDirectories.RefreshLastUsed(gitDirectory, DateTimeOffset.UtcNow);
+        }
     }
 
     /// <summary>
@@ -535,7 +562,7 @@ internal static class LocalGitCheckout
             throw GitFileRefusal(label, repoRoot, existing.Refusal);
         }
 
-        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress);
+        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress, layout.GitRoot);
         var scratch = ScratchDirectory.Create(checkoutsRoot);
 
         try
@@ -558,7 +585,8 @@ internal static class LocalGitCheckout
                     try
                     {
                         gitClient.CloneWithReference(
-                            definition.Repository.Url, scratch.Path, referenceCheckout, progress, scratch.GitDirectory);
+                            definition.Repository.Url, scratch.Path, ReferenceRepository(referenceCheckout, layout.GitRoot),
+                            progress, scratch.GitDirectory);
                     }
                     catch (GitReferenceFailedException ex)
                     {
@@ -675,6 +703,12 @@ internal static class LocalGitCheckout
         }
     }
 
+    // A working tree whose '.git' is a file is borrowed from through its git directory.
+    private static string ReferenceRepository(string referenceCheckout, string? gitRoot) =>
+        Directory.Exists(Path.Combine(referenceCheckout, ".git"))
+            ? referenceCheckout
+            : ManagedGitDirectory.Resolve(referenceCheckout, gitRoot).GitDirectory ?? referenceCheckout;
+
     private static ServiceSourcesConfigurationException GitFileRefusal(Raw label, string repoRoot, string reason) =>
         ServiceSourcesConfigurationException.For(
             $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file that is not one this tool wrote — {Raw.Escaped(reason)}. A linked worktree, a clone made with --separate-git-dir elsewhere, and a checkout that was moved or renamed are all refused. Move it aside (or delete it) and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
@@ -788,11 +822,12 @@ internal static class LocalGitCheckout
     /// optimisation, and the home checkout is a directory this tool does not control.
     /// </summary>
     private static string? TryReferenceCheckout(
-        Func<string?>? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient, IGitProgressSink? progress)
+        Func<string?>? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient, IGitProgressSink? progress,
+        string? gitRoot)
     {
         try
         {
-            return ReferenceCheckout(homeAppHostDirectory?.Invoke(), definition, gitClient);
+            return ReferenceCheckout(homeAppHostDirectory?.Invoke(), definition, gitClient, gitRoot);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -806,11 +841,12 @@ internal static class LocalGitCheckout
     /// The home worktree's checkout of this repository, when it is safe to borrow objects from.
     /// </summary>
     /// <remarks>
-    /// Only a '.git' directory: git refuses a linked-worktree reference. The origin check keeps an
-    /// unrelated repository at the same name from being borrowed from.
+    /// Only a '.git' directory or a separate git directory this tool made: git refuses a
+    /// linked-worktree reference. The origin check keeps an unrelated repository at the same name
+    /// from being borrowed from.
     /// </remarks>
     internal static string? ReferenceCheckout(
-        string? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient)
+        string? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient, string? gitRoot = null)
     {
         if (homeAppHostDirectory is null)
         {
@@ -819,7 +855,7 @@ internal static class LocalGitCheckout
 
         var candidate = ManagedRepoRoot(homeAppHostDirectory, definition.Repository.CheckoutName);
 
-        return Directory.Exists(Path.Combine(candidate, ".git"))
+        return ManagedGitDirectory.Resolve(candidate, gitRoot).GitDirectory is not null
             && gitClient.GetOriginUrl(candidate) is { } origin
             && RepositoryUrlsMatch(origin, definition.Repository.Url)
                 ? candidate
