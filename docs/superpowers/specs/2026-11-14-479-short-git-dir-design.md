@@ -52,16 +52,18 @@ ticket lists and corrects three claims it makes about the code:
 | Staging root length | `clone --dissociate --separate-git-dir` | then `status`, `repack -a -d`, `fetch` |
 |---|---|---|
 | 195, 235 | ok | ok, no warnings |
-| 250, 253 | ok | ok; `repack`/`status` warn `unable to access '.gitattributes': Filename too long` |
+| 250, 252, 253, 254 | ok | ok (the `.gitattributes` "Filename too long" warning seen earlier at 250 and 253 did not reproduce in a round 3 re-measure, run with the process working directory set to the checkout) |
+| 255 | clone ok, but every later git command fails: `fatal: not a git repository`, with `git -C` and with the working directory alike | n/a |
 | 265, 295 | fails: `fatal: this operation must be run in a work tree`, `Clone succeeded, but checkout failed` | n/a |
 
 - Pack files were never the problem: with `core.longpaths=true`, `repack`, `fetch` and `gc` work with
   pack paths of 271-274 characters in an in-place clone at about 208. What fails an in-place clone is
   `'$GIT_DIR' too big` once the git directory passes 220 characters (checkout root 216 or more), and a
   separate git directory sidesteps it: `repack -a -d` and `fetch` succeed at 250 characters.
-- The **working tree root** has its own ceiling, near 250 characters here: git changes into the
-  directory, and a directory path past about 248 characters cannot be a current directory on Windows
-  without the long-path opt-in. It is not "no matter how deep" as the ticket says. The ticket's note of
+- The **working tree root** has its own ceiling, 254 characters here: git finds the repository by reading
+  `<root>\.git` with a call that is limited to 259 characters even under `core.longpaths`, so at a root of 255
+  the clone succeeds and then every git command fails with `not a git repository` (the same with the process
+  working directory set to the checkout, so it is not a `git -C` artifact). It is not "no matter how deep" as the ticket says. The ticket's note of
   files up to 312 characters verified under `core.longpaths` is about file depth below a shallower root,
   not about the root.
 - `.git` file written by `--separate-git-dir` is `gitdir: <absolute path, forward slashes>`.
@@ -74,7 +76,7 @@ So the feature raises the longest usable staging root from 215 to 235 characters
 directory of 189 characters for a checkout name of 18 characters or fewer (`235 - 27 - 19`, where 27 is
 `\.servicesources\checkouts` and 19 is `\.incoming-<8 hex>`), against 169 without it (`215 - 46`); a longer checkout name makes the final path the
 longer one and lowers it by the difference. A refusal remains beyond that (decision D1). The first
-warnings were seen at 250 and the first failure at 265, so 235 leaves about 15 characters of margin on purpose.
+failure at a root of 255 (`<root>\.git` reaching 260), so 235 leaves 19 characters of margin on purpose for tools that append path components.
 
 ## 3. Decisions
 
@@ -107,7 +109,7 @@ the git build (not configurable), measured on git 2.52.0.windows.1 only; the cod
 The refusal stays a `ServiceSourcesConfigurationException`, still before anything is downloaded, still
 naming the length and how many characters to remove. Its content changes: it no longer cites a pack
 file, it cites the working-tree ceiling (`L > 235`), and the "move the AppHost" advice is the same. The
-235 is the largest staging root that was clean in section 2 with margin below the first warnings at 250.
+235 is the largest staging root that was clean in section 2 with 19 characters of margin below the first failure at 255.
 It is a constant (`MaxWorkingTreeRootLength`) with that measurement as its comment. `GitPathLimit` derives
 `MaxGitDirLength` (260 minus the 40 reserve), `MaxInPlaceRootLength` (that minus the `\.git` suffix) and the
 git-root budget from named values instead of the old pack-suffix lengths; the tests assert 215/216/235/236.

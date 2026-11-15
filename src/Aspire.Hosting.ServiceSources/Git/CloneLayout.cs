@@ -43,7 +43,7 @@ internal static class CloneLayout
         {
             var excess = longestRoot.Length - GitPathLimit.MaxWorkingTreeRootLength;
             throw ServiceSourcesConfigurationException.For(
-                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot run in a working tree whose directory path is past about {GitPathLimit.MaxWorkingTreeRootLength} characters without the long-path opt-in, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
+                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot find a repository whose '.git' path passes 259 characters, so a working tree directory path is limited to about {GitPathLimit.MaxWorkingTreeRootLength} characters, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
         }
 
         if (!GitPathLimit.IsUsableGitRoot(options.GitRoot))

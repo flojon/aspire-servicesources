@@ -55,8 +55,9 @@ as usual. A shallower AppHost is cloned exactly as before, with `.git` inside th
 
 ### `cannot clone into …: … at least N characters shorter`
 
-Even with the git directory elsewhere, git for Windows cannot work in a working tree whose own
-directory path is past about 235 characters (the clone is staged under `.incoming-<8 hex>`, a 19-character
+Even with the git directory elsewhere, git for Windows cannot find a repository whose `.git` file path
+passes 259 characters, so a working tree's own directory path is limited to 254 characters at the very
+most. The limit used here is 235, which leaves a margin (the clone is staged under `.incoming-<8 hex>`, a 19-character
 segment including the backslash, so for a checkout name of up to 18 characters the staging path is
 the one that counts). For such a name that is an AppHost directory of 189 characters. Beyond it the error
 names the length and how many characters to remove; move the AppHost, or the worktree it is in, to a

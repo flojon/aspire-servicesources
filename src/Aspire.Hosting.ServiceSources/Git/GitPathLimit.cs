@@ -25,9 +25,9 @@ internal static class GitPathLimit
     internal const int MaxInPlaceRootLength = MaxGitDirLength - 5;
 
     /// <summary>
-    /// The longest working-tree root git for Windows ran cleanly in with a short separate git directory
-    /// and without the long-path opt-in: <c>repack</c>, <c>fetch</c> and <c>status</c> were quiet at 195
-    /// and 235 characters, warned "Filename too long" at 250, and the clone itself failed at 265.
+    /// The longest working-tree root kept with a margin. git for Windows ran cleanly with a short separate git
+    /// directory up to 254 characters; at 255 the clone worked but every later command failed to find the repository
+    /// (<c>&lt;root&gt;\.git</c> reaching 260), and at 265 the clone itself failed. 235 leaves 19 characters of margin.
     /// </summary>
     internal const int MaxWorkingTreeRootLength = 235;
 
