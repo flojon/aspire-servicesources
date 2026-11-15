@@ -35,7 +35,12 @@ internal interface IGitClient
     /// first run, and the only one whose wait a developer is shown (see
     /// <see cref="Sources.DeferredCheckout"/>).
     /// </param>
-    void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null);
+    /// <param name="separateGitDir">
+    /// A directory the clone's git directory is created in instead of <c>&lt;destination&gt;\.git</c>,
+    /// leaving a <c>.git</c> file behind. Always a path this package computed, never user input.
+    /// </param>
+    void Clone(
+        string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null);
 
     /// <summary>
     /// <see cref="Clone"/>, borrowing objects from <paramref name="referenceRepository"/> to save
@@ -47,8 +52,9 @@ internal interface IGitClient
     /// plain clone so test doubles need not implement it.
     /// </remarks>
     void CloneWithReference(
-        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null) =>
-        Clone(repositoryUrl, destinationPath, progress);
+        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null,
+        string? separateGitDir = null) =>
+        Clone(repositoryUrl, destinationPath, progress, separateGitDir);
 
     void Checkout(string repositoryPath, string reference);
 

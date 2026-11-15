@@ -293,7 +293,7 @@ public class MissingHostingPackageTests
     /// </summary>
     private sealed class UnusedGitClient : IGitClient
     {
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null) =>
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null) =>
             throw new InvalidOperationException("a path override must not clone");
 
         public void Checkout(string repositoryPath, string reference) =>

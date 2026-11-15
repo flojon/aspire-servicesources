@@ -172,7 +172,7 @@ public class ScratchDirectoryPairedTests
 public class ScratchDirectoryPairedConcurrencyTests
 {
     [Fact]
-    public void TwoCreates_SameFinalPath_GetDistinctGitDirectories()
+    public async Task TwoCreates_SameFinalPath_GetDistinctGitDirectories()
     {
         var temp = TempDirectories.CreateSubdirectory().FullName;
         var checkoutsRoot = Path.Combine(temp, "checkouts");
@@ -187,8 +187,7 @@ public class ScratchDirectoryPairedConcurrencyTests
             scratch.PairGitDirectory(separate);
             return scratch;
         })).ToArray();
-        Task.WaitAll(tasks);
-        var scratches = tasks.Select(t => t.Result).ToArray();
+        var scratches = await Task.WhenAll(tasks);
 
         try
         {

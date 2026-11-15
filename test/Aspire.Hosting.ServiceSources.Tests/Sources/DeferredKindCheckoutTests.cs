@@ -34,7 +34,7 @@ public class DeferredKindCheckoutTests
 
         public void FailFor(string repositoryUrl, Exception exception) => _failFor[repositoryUrl] = exception;
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
             lock (Cloned)
             {

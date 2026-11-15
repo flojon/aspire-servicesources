@@ -31,7 +31,7 @@ public class PrepareDeferredTests
         public ManualResetEventSlim BlockFor(string repositoryUrl) =>
             _blockUntil[repositoryUrl] = new ManualResetEventSlim(false);
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
             lock (Cloned)
             {

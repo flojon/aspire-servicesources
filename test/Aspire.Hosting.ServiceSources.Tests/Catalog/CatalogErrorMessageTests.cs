@@ -164,7 +164,7 @@ public class CatalogErrorMessageTests
     /// </summary>
     private sealed class NeverCalledGitClient : Aspire.Hosting.ServiceSources.Git.IGitClient
     {
-        public void Clone(string repositoryUrl, string destinationPath, Aspire.Hosting.ServiceSources.Git.IGitProgressSink? progress = null) =>
+        public void Clone(string repositoryUrl, string destinationPath, Aspire.Hosting.ServiceSources.Git.IGitProgressSink? progress = null, string? separateGitDir = null) =>
             throw new NotImplementedException();
 
         public void Checkout(string repositoryPath, string reference) => throw new NotImplementedException();

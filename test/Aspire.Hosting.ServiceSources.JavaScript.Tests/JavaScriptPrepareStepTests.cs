@@ -31,7 +31,7 @@ public class JavaScriptPrepareStepTests
     /// </summary>
     private sealed class FakeGitClient : IGitClient
     {
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
             Directory.CreateDirectory(Path.Combine(destinationPath, ".git"));
             File.WriteAllText(Path.Combine(destinationPath, "prepare.sh"), "#!/bin/sh\n");

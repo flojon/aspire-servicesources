@@ -32,6 +32,43 @@ public class GitCliClientTests
     [Fact]
     public void EnsureAvailable_GitOnPath_DoesNotThrow() => Client().EnsureAvailable();
 
+    private static string NewGitDirectory(string name = "short.git") =>
+        Path.Combine(TempDirectories.CreateSubdirectory("git root ").FullName, name);
+
+    [Fact]
+    public void Clone_WithSeparateGitDir_WritesGitFileAndKeepsObjectsInGitDir()
+    {
+        var origin = TestRepository.CreateOrigin();
+        var destination = TestRepository.EmptyDestination();
+        var gitDirectory = NewGitDirectory();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: true)
+            .Clone(origin.Path, destination, separateGitDir: gitDirectory);
+
+        var gitFile = File.ReadAllLines(Path.Combine(destination, ".git"));
+        Assert.StartsWith("gitdir: ", gitFile[0], StringComparison.Ordinal);
+        Assert.Equal(
+            Path.GetFullPath(gitDirectory),
+            Path.GetFullPath(gitFile[0]["gitdir: ".Length..]),
+            ignoreCase: OperatingSystem.IsWindows());
+        Assert.True(Directory.Exists(Path.Combine(gitDirectory, "objects")));
+        TestRepository.At(destination).Git("status");
+        Assert.Contains("longpaths = true", File.ReadAllText(Path.Combine(gitDirectory, "config")), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Clone_WithSeparateGitDir_ThenMoveWorkingTree_StatusStillWorks()
+    {
+        var origin = TestRepository.CreateOrigin();
+        var destination = TestRepository.EmptyDestination();
+        var moved = TestRepository.EmptyDestination("moved");
+
+        Client().Clone(origin.Path, destination, separateGitDir: NewGitDirectory());
+        Directory.Move(destination, moved);
+
+        TestRepository.At(moved).Git("status");
+    }
+
     [Fact]
     public void Clone_CopiesRepositoryToDestination()
     {

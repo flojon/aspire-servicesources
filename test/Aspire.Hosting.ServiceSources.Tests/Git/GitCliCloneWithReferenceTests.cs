@@ -33,6 +33,22 @@ public class GitCliCloneWithReferenceTests
         Assert.Equal("main content", TestRepository.At(destination).Read("file.txt"));
     }
 
+
+    [Fact]
+    public void CloneWithReference_WithSeparateGitDir_Dissociates()
+    {
+        var origin = TestRepository.CreateOrigin();
+        var reference = TestRepository.EmptyDestination("reference");
+        Client().Clone(CloneUrl(origin.Path), reference);
+        var destination = TestRepository.EmptyDestination();
+        var gitDirectory = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "short.git");
+
+        Client().CloneWithReference(CloneUrl(origin.Path), destination, reference, separateGitDir: gitDirectory);
+
+        Assert.True(File.Exists(Path.Combine(destination, ".git")));
+        Assert.False(File.Exists(Path.Combine(gitDirectory, "objects", "info", "alternates")));
+        Assert.Equal("main content", TestRepository.At(destination).Read("file.txt"));
+    }
     [Fact]
     public void CloneWithReference_ReferenceGone_ClonesNormally()
     {

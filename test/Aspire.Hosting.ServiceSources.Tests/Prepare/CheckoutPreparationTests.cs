@@ -75,7 +75,7 @@ public class CheckoutPreparationTests
             return HeadCommitSha;
         }
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
         }
 

@@ -21,7 +21,7 @@ internal sealed class ScriptedCloneGitClient : IGitClient
 
     public IReadOnlyList<(string Destination, string Reference)> ReferenceClones { get { lock (_gate) { return [.. _referenceClones]; } } }
 
-    public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+    public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
     {
         lock (_gate)
         {
@@ -32,7 +32,8 @@ internal sealed class ScriptedCloneGitClient : IGitClient
     }
 
     public void CloneWithReference(
-        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null)
+        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null,
+        string? separateGitDir = null)
     {
         lock (_gate)
         {
