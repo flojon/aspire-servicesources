@@ -1,0 +1,51 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
+namespace Aspire.Hosting.ServiceSources.Git;
+
+internal enum CloneLayoutKind
+{
+    InPlace,
+    Separate,
+}
+
+/// <param name="GitRoot">Where separate git directories live; <see langword="null"/> when there is no usable one.</param>
+/// <param name="IsWindows">Defaults to the running OS; injectable so the decision is testable anywhere.</param>
+/// <param name="ForceSeparate">Replaces the Windows gate and the in-place fit, so other platforms can exercise the separate layout.</param>
+internal sealed record CloneLayoutOptions(string? GitRoot, bool? IsWindows = null, bool ForceSeparate = false)
+{
+    public static CloneLayoutOptions Default => new(SeparateGitDirectories.DefaultRoot());
+}
+
+/// <summary>
+/// Decides whether a managed clone keeps its git directory in place or in a short separate one.
+/// </summary>
+internal static class CloneLayout
+{
+    public static CloneLayoutKind Decide(Raw label, string checkoutPath, string stagingPath, CloneLayoutOptions options)
+    {
+        if (!(options.IsWindows ?? OperatingSystem.IsWindows()) && !options.ForceSeparate)
+        {
+            return CloneLayoutKind.InPlace;
+        }
+
+        var required = PackPathLimit.Required(checkoutPath, stagingPath, out var longestRoot);
+        if (!options.ForceSeparate && required <= PackPathLimit.MaxPathLength)
+        {
+            return CloneLayoutKind.InPlace;
+        }
+
+        if (longestRoot.Length > PackPathLimit.MaxWorkingTreeRootLength)
+        {
+            var excess = longestRoot.Length - PackPathLimit.MaxWorkingTreeRootLength;
+            throw ServiceSourcesConfigurationException.For(
+                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot run in a working tree whose directory path is past about {PackPathLimit.MaxWorkingTreeRootLength} characters without the long-path opt-in, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
+        }
+
+        if (!PackPathLimit.IsUsableGitRoot(options.GitRoot))
+        {
+            throw PackPathLimit.PackPathRefusal(label, checkoutPath, longestRoot);
+        }
+
+        return CloneLayoutKind.Separate;
+    }
+}

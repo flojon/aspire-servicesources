@@ -28,6 +28,25 @@ internal static class PackPathLimit
 
     internal static readonly int MaxCloneRootLength = MaxPathLength - LongestPackSuffixLength;
 
+    /// <summary>The same temporary pack, measured from a git directory instead of from a checkout.</summary>
+    internal static readonly string LongestPackFileInGitDir = LongestPackFile[@"\.git".Length..];
+
+    /// <summary>
+    /// The longest working-tree root git for Windows ran cleanly in without the long-path opt-in:
+    /// <c>repack</c>, <c>fetch</c> and <c>status</c> were quiet at 195 and 235 characters, warned
+    /// "Filename too long" at 250, and the clone itself failed at 265.
+    /// </summary>
+    internal const int MaxWorkingTreeRootLength = 235;
+
+    /// <summary>
+    /// A git directory is <c>&lt;root&gt;\&lt;16 hex&gt;-&lt;8 hex&gt;.git</c> (29 characters), and its longest pack file
+    /// sits <see cref="LongestPackFileInGitDir"/> below that.
+    /// </summary>
+    internal static readonly int MaxGitRootLength = MaxPathLength - 29 - LongestPackFileInGitDir.Length - 1;
+
+    internal static bool IsUsableGitRoot(string? gitRoot) =>
+        !string.IsNullOrEmpty(gitRoot) && gitRoot.Length <= MaxGitRootLength;
+
     /// <summary>
     /// Throws when a clone staged at <paramref name="stagingPath"/> and renamed to
     /// <paramref name="checkoutPath"/> would need a pack path past the limit.
@@ -40,18 +59,27 @@ internal static class PackPathLimit
             return;
         }
 
+        if (Required(checkoutPath, stagingPath, out var longestRoot) > MaxPathLength)
+        {
+            throw PackPathRefusal(label, checkoutPath, longestRoot);
+        }
+    }
+
+    internal static int Required(string checkoutPath, string stagingPath, out string longestRoot)
+    {
         // Packs are written under the staging directory and later under the checkout, so both count.
         var root = Path.GetFullPath(checkoutPath);
         var staging = Path.GetFullPath(stagingPath);
-        var longestRoot = root.Length >= staging.Length ? root : staging;
-        var required = longestRoot.Length + LongestPackSuffixLength;
-        if (required <= MaxPathLength)
-        {
-            return;
-        }
+        longestRoot = root.Length >= staging.Length ? root : staging;
+        return longestRoot.Length + LongestPackSuffixLength;
+    }
 
+    internal static ServiceSourcesConfigurationException PackPathRefusal(Raw label, string checkoutPath, string longestRoot)
+    {
+        var root = Path.GetFullPath(checkoutPath);
+        var required = longestRoot.Length + LongestPackSuffixLength;
         var excess = required - MaxPathLength;
-        throw ServiceSourcesConfigurationException.For(
+        return ServiceSourcesConfigurationException.For(
             $"{label}: cannot clone into '{Raw.Display(root)}'. git for Windows cannot write a pack file past {MaxPathLength} characters, whatever core.longpaths or LongPathsEnabled say, and the temporary pack git writes when it repacks (to borrow objects while cloning, and during later fetches) would need {required} characters (under '{Raw.Display(longestRoot)}', plus {LongestPackSuffixLength} for '\\.git\\objects\\pack\\.tmp-<pid>-pack-<hash>.pack'). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
     }
 }
