@@ -74,9 +74,13 @@ the `"path"` spelling to paste instead.)
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
-  `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
-  than replaced; point at it with the [`"path"` source](path.md) instead. A directory there with no
+  overwriting your work. On Windows, an AppHost directory too deep for git's pack files gets a clone
+  whose `.git` is a file pointing at a short git directory under `%LOCALAPPDATA%\ServiceSources\git`
+  (see [Troubleshooting](../troubleshooting.md#long-paths-on-windows)); a `.git` file this tool wrote
+  itself is recognised. Anything else you put at that path yourself that isn't a plain clone — a
+  linked `git worktree`, a clone made with `--separate-git-dir` elsewhere, or a checkout moved or
+  renamed together with its AppHost — is refused with the specific reason rather than replaced;
+  point at it with the [`"path"` source](path.md) instead. A directory there with no
   `.git` entry at all is treated as debris from an interrupted clone and **deleted**, so don't
   hand-place a plain directory as a quick override — use `"path"` for that too. The `.servicesources/` directory gitignores itself
   on first use — no need to add it to your own `.gitignore` — and shields what it holds from your

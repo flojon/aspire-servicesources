@@ -60,7 +60,10 @@ internal sealed class TestRepository
         File.ReadAllText(System.IO.Path.Combine(Path, relativePath));
 
     /// <summary>Runs a git command in this repository, failing the test if it doesn't succeed.</summary>
-    public string Git(params string[] arguments)
+    public string Git(params string[] arguments) => GitAll(arguments).Out;
+
+    /// <summary><see cref="Git"/>, also returning stderr, where git puts its warnings.</summary>
+    public (string Out, string Err) GitAll(params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("git")
         {
@@ -90,7 +93,7 @@ internal sealed class TestRepository
             process.ExitCode == 0,
             $"git {string.Join(' ', arguments)} exited with {process.ExitCode}: {stderr.Result}");
 
-        return stdout.Result.Trim();
+        return (stdout.Result.Trim(), stderr.Result);
     }
 
     /// <summary>

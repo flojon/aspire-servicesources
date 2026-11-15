@@ -58,6 +58,17 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **A managed clone on Windows whose AppHost directory is too deep for the in-place pack path now
+  keeps its git directory in a short one under `%LOCALAPPDATA%\ServiceSources\git`** ([#479]).
+  Before, a clone was refused once the AppHost directory passed about 129 characters ([#474]); now
+  AppHost directories up to about 190 characters clone with `git clone --separate-git-dir`, leaving
+  the working tree where it was and a `.git` file pointing at the short git directory. Beyond that
+  ceiling the clone is still refused, with a message about the working-tree path instead of the
+  pack file. A working checkout is never moved, so a shallower AppHost clones as before; a git
+  directory nothing refers to any more is deleted after 14 days; an existing deep in-place checkout
+  gets a notice to delete it and re-run. See
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
+
 - **The error for `source: repository` on a service whose catalog entry has no repository now offers
   a switch to `url`, `container` or `kubernetes` again, but only where that source would actually
   resolve the entry** ([#378]). Each source answers for itself, through the same validation its own
@@ -2191,3 +2202,4 @@ Targets `net10.0`.
 [#490]: https://github.com/flojon/aspire-servicesources/issues/490
 [#486]: https://github.com/flojon/aspire-servicesources/issues/486
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
+[#479]: https://github.com/flojon/aspire-servicesources/issues/479

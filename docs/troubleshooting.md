@@ -29,21 +29,45 @@ place; a staging directory left by a clone that was killed is removed the next t
 in that folder (the clone's log says so), so you can also delete it by hand. Each managed clone also
 has `core.longpaths=true` in its own git config, so plain `git status` and your IDE work in it too.
 
-### `cannot clone into …: git for Windows cannot write a pack file past 259 characters`
+### Deep AppHost directories: the git directory moves out of the checkout
 
 `core.longpaths` does not cover pack files: git fails to write one whose whole path passes 259
 characters, whatever `LongPathsEnabled` says. The longest is the temporary pack a repack writes,
-`.git\objects\pack\.tmp-<pid>-pack-<hash>.pack` (up to 85 characters below the clone root, against
-69 for a plain `pack-<hash>.pack`). A clone repacks when it borrows objects from the main worktree's
-checkout, and `git gc --auto` repacks during later fetches, so the check sizes every clone for it.
-Because clones are staged in `<AppHost>\.servicesources\checkouts\.incoming-<8 hex>` (45 characters
-below the AppHost), an AppHost directory of more than about 129 characters cannot clone at all; a
-service name longer than the 18-character staging name lowers that further. For example, an AppHost
-at a 140-character path stages at 185 characters, so the repack would need 270 and the error asks
-for a path at least 11 characters shorter. The error names
-the length it needs and how many characters to remove; move the AppHost, or the worktree it is in,
-to a shorter path. Without this check git's own message is `unable to rename temporary '*.pack'
-file`.
+`.git\objects\pack\.tmp-<pid>-pack-<hash>.pack` (85 characters below the clone root). A clone
+repacks when it borrows objects from the main worktree's checkout, and `git gc --auto` repacks
+during later fetches, so the clone has to leave room for it.
+
+When the AppHost directory is deep enough that it would not fit (more than about 129 characters),
+the clone is made with `git clone --separate-git-dir`. The working tree stays at
+`<AppHost>\.servicesources\checkouts\<name>`, and its `.git` is a file that points at a short git
+directory under `%LOCALAPPDATA%\ServiceSources\git`. Plain `git` and your IDE work in the checkout
+as usual. A shallower AppHost is cloned exactly as before, with `.git` inside the checkout.
+
+- A git directory that no checkout refers to any more (the checkout was deleted, or its AppHost
+  moved) is removed automatically after 14 days without use. Each one is a full clone, so deleting a
+  checkout you will not need again and removing its folder under `%LOCALAPPDATA%\ServiceSources\git`
+  frees the space sooner. A checkout in use keeps its own git directory alive.
+- A checkout whose AppHost directory was moved or renamed is not picked up again: its `.git` file
+  names the old location, and it is refused with a message that says so. Delete the checkout
+  directory and re-run to clone it again.
+
+### `cannot clone into …: … at least N characters shorter`
+
+Even with the git directory elsewhere, git for Windows cannot work in a working tree whose own
+directory path is past about 235 characters (the clone is staged under `.incoming-<8 hex>`, 19
+characters longer than the final directory, and that is the path that counts). For a checkout name
+of up to 18 characters that is an AppHost directory of about 190 characters. Beyond it the error
+names the length and how many characters to remove; move the AppHost, or the worktree it is in, to a
+shorter path. If `%LOCALAPPDATA%` is unavailable or its `ServiceSources\git` folder would itself be
+too long, a deep AppHost is refused with the pack-file wording instead (the path would need N
+characters, against 259).
+
+### A checkout made before the git directory moved out is too deep to maintain
+
+An existing checkout is never moved. If its git directory is still inside it and its path is too deep
+for git to repack there, a start logs a notice: a fetch or `gc` may fail with `Filename too long`.
+Delete `.servicesources\checkouts\<name>` and re-run, and it is cloned again with a short git
+directory.
 
 ## Getting the full exception detail
 
