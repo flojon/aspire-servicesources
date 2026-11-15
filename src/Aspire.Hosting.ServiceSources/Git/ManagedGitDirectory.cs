@@ -158,8 +158,18 @@ internal static partial class ManagedGitDirectory
             return $"the '.git' file at '{dotGit}' names a git directory with a '..' segment";
         }
 
-        var full = Normalize(target);
-        var root = Normalize(gitRoot);
+        string full;
+        string root;
+        try
+        {
+            full = Normalize(target);
+            root = Normalize(gitRoot);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return $"the '.git' file at '{dotGit}' names a path that cannot be normalized";
+        }
+
         var parent = Path.GetDirectoryName(full);
         if (parent is null || !string.Equals(parent, root, PathComparison))
         {

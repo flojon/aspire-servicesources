@@ -67,8 +67,8 @@ characters, against 259).
 
 An existing checkout is never moved. If its git directory is still inside it and its path is too deep
 for git to repack there, a start logs a notice: a fetch or `gc` may fail with `Filename too long`.
-If it has no local changes, delete `.servicesources\checkouts\<name>` (otherwise move it aside) and re-run, and it is cloned again with a short git
-directory.
+If it has local changes or unpushed commits, move `.servicesources\checkouts\<name>` out of the AppHost; otherwise delete it.
+Then re-run, and it is cloned again with a short git directory (this needs an AppHost path within the limit above).
 
 ## Getting the full exception detail
 
