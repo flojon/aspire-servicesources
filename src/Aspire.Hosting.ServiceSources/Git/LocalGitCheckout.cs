@@ -319,7 +319,8 @@ internal static class LocalGitCheckout
         string appHostDirectory,
         IGitClient gitClient,
         IGitProgressSink? progress = null,
-        Func<string?>? homeAppHostDirectory = null)
+        Func<string?>? homeAppHostDirectory = null,
+        CloneLayoutOptions? layout = null)
     {
         // Both checked ahead of everything else below — the managed-checkout branch, the ref this
         // checkout will sit on — because both are about a shape of configuration that must never be
@@ -359,8 +360,9 @@ internal static class LocalGitCheckout
         EnsureToolDirectory(appHostDirectory);
         var repoRoot = ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName);
         var checkoutsRoot = Path.GetDirectoryName(repoRoot)!;
+        var layoutOptions = layout ?? CloneLayoutOptions.Default;
 
-        if (Directory.Exists(Path.Combine(repoRoot, ".git")))
+        if (ManagedGitDirectory.Resolve(repoRoot, layoutOptions.GitRoot).GitDirectory is not null)
         {
             // A working tree from an earlier run, or a developer's own. Untouched here.
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
@@ -380,7 +382,7 @@ internal static class LocalGitCheckout
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, homeAppHostDirectory, gitClient, progress))
+        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, homeAppHostDirectory, gitClient, progress, layoutOptions))
         {
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
@@ -505,25 +507,32 @@ internal static class LocalGitCheckout
         string repoRoot,
         Func<string?>? homeAppHostDirectory,
         IGitClient gitClient,
-        IGitProgressSink? progress)
+        IGitProgressSink? progress,
+        CloneLayoutOptions layout)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
         Directory.CreateDirectory(checkoutsRoot);
-        ScratchDirectory.SweepAbandoned(checkoutsRoot, progress);
+        ScratchDirectory.SweepAbandoned(checkoutsRoot, progress, layout.GitRoot);
 
-        // Reached because ".git" is not a *directory*, which is not the same as "no repository":
+        // Reached because no ".git" *directory* is there, which is not the same as "no repository":
         // ".git" is a file for a linked worktree ("git worktree add") and for a clone made with
         // --separate-git-dir. Both are complete checkouts that can hold uncommitted work, so the
         // delete further below would destroy one. Only debris — content with no ".git" entry at all
-        // — is removable; anything else keeps the non-destructive error this branch used to produce.
+        // — is removable, and only a ".git" file this tool wrote itself is adopted; anything else
+        // keeps the non-destructive error this branch used to produce.
         // Refused up here, before the clone, so the download is never paid for: unlike the
         // concurrent-clone collision below, this state is the user's own and cannot appear midway.
-        if (File.Exists(Path.Combine(repoRoot, ".git")))
+        var existing = ManagedGitDirectory.Resolve(repoRoot, layout.GitRoot);
+        if (existing.GitDirectory is not null)
         {
-            throw ServiceSourcesConfigurationException.For(
-                $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
+            return true;
+        }
+
+        if (existing.Refusal is not null)
+        {
+            throw GitFileRefusal(label, repoRoot, existing.Refusal);
         }
 
         var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress);
@@ -531,19 +540,25 @@ internal static class LocalGitCheckout
 
         try
         {
-            PackPathLimit.EnsureFits(label, repoRoot, scratch.Path);
+            var separate = CloneLayout.Decide(label, repoRoot, scratch.Path, layout) == CloneLayoutKind.Separate;
+            if (separate)
+            {
+                SeparateGitDirectories.SweepOrphans(layout.GitRoot!, DateTimeOffset.UtcNow, progress);
+                scratch.PairGitDirectory(new SeparateGit(layout.GitRoot!, repoRoot));
+            }
 
             try
             {
                 if (referenceCheckout is null)
                 {
-                    gitClient.Clone(definition.Repository.Url, scratch.Path, progress);
+                    gitClient.Clone(definition.Repository.Url, scratch.Path, progress, scratch.GitDirectory);
                 }
                 else
                 {
                     try
                     {
-                        gitClient.CloneWithReference(definition.Repository.Url, scratch.Path, referenceCheckout, progress);
+                        gitClient.CloneWithReference(
+                            definition.Repository.Url, scratch.Path, referenceCheckout, progress, scratch.GitDirectory);
                     }
                     catch (GitReferenceFailedException ex)
                     {
@@ -554,7 +569,12 @@ internal static class LocalGitCheckout
                         // A fresh directory, since the failed attempt may have left files behind.
                         scratch.Dispose();
                         scratch = ScratchDirectory.Create(checkoutsRoot);
-                        gitClient.Clone(definition.Repository.Url, scratch.Path, progress);
+                        if (separate)
+                        {
+                            scratch.PairGitDirectory(new SeparateGit(layout.GitRoot!, repoRoot));
+                        }
+
+                        gitClient.Clone(definition.Repository.Url, scratch.Path, progress, scratch.GitDirectory);
                     }
                 }
             }
@@ -581,11 +601,18 @@ internal static class LocalGitCheckout
             // including work only it has. Deciding immediately before the rename narrows the window
             // to these adjacent operations, and means nothing is removed until its replacement is
             // already in hand.
-            if (Directory.Exists(Path.Combine(repoRoot, ".git")))
+            var landed = ManagedGitDirectory.Resolve(repoRoot, layout.GitRoot);
+            if (landed.GitDirectory is not null)
             {
                 // A concurrent resolution of the same service landed its clone first. Ours is
                 // redundant rather than wrong — discard it in the finally and use theirs.
                 return true;
+            }
+
+            if (landed.Refusal is not null)
+            {
+                // A working tree that is not ours appeared meanwhile; deleting it as debris would destroy it.
+                throw GitFileRefusal(label, repoRoot, landed.Refusal);
             }
 
             // Debris from a version that predates this method, or from a crash before the rename
@@ -610,15 +637,24 @@ internal static class LocalGitCheckout
                 }
             }
 
+            if (scratch.GitDirectory is { } gitDirectory)
+            {
+                // Before the move, so a crash between the two leaves an unreferenced directory the sweep
+                // collects rather than a checkout whose '.git' file names a directory with no record.
+                var now = DateTimeOffset.UtcNow;
+                ManagedGitDirectory.WriteOwner(gitDirectory, new OwnerRecord(repoRoot, now, now));
+            }
+
             try
             {
                 Directory.Move(scratch.Path, repoRoot);
+                scratch.AdoptGitDirectory();
             }
             catch (IOException ex)
             {
                 // The same collision one instant later: the check above and this rename are not one
                 // atomic operation. Ours is redundant rather than wrong — discard it and use theirs.
-                if (Directory.Exists(Path.Combine(repoRoot, ".git")))
+                if (ManagedGitDirectory.Resolve(repoRoot, layout.GitRoot).GitDirectory is not null)
                 {
                     return true;
                 }
@@ -638,6 +674,10 @@ internal static class LocalGitCheckout
             scratch.Dispose();
         }
     }
+
+    private static ServiceSourcesConfigurationException GitFileRefusal(Raw label, string repoRoot, string reason) =>
+        ServiceSourcesConfigurationException.For(
+            $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file that is not one this tool wrote — {Raw.Escaped(reason)}. A linked worktree, a clone made with --separate-git-dir elsewhere, and a checkout that was moved or renamed are all refused. Move it aside (or delete it) and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
 
     private static void CheckoutWithFetchRetry(
         Raw label, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)

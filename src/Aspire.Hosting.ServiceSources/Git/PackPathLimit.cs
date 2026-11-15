@@ -3,7 +3,7 @@ using Aspire.Hosting.ServiceSources.Messages;
 namespace Aspire.Hosting.ServiceSources.Git;
 
 /// <summary>
-/// Refuses, before any download, a clone whose pack file git for Windows cannot write.
+/// The path-length limits behind the in-place or separate git directory decision (see <see cref="CloneLayout"/>).
 /// </summary>
 /// <remarks>
 /// <c>core.longpaths</c> does not cover writing or renaming pack files, so a clone root that leaves
@@ -46,24 +46,6 @@ internal static class PackPathLimit
 
     internal static bool IsUsableGitRoot(string? gitRoot) =>
         !string.IsNullOrEmpty(gitRoot) && gitRoot.Length <= MaxGitRootLength;
-
-    /// <summary>
-    /// Throws when a clone staged at <paramref name="stagingPath"/> and renamed to
-    /// <paramref name="checkoutPath"/> would need a pack path past the limit.
-    /// </summary>
-    /// <param name="isWindows">Defaults to the running OS; injectable so the check is testable anywhere.</param>
-    public static void EnsureFits(Raw label, string checkoutPath, string stagingPath, bool? isWindows = null)
-    {
-        if (!(isWindows ?? OperatingSystem.IsWindows()))
-        {
-            return;
-        }
-
-        if (Required(checkoutPath, stagingPath, out var longestRoot) > MaxPathLength)
-        {
-            throw PackPathRefusal(label, checkoutPath, longestRoot);
-        }
-    }
 
     internal static int Required(string checkoutPath, string stagingPath, out string longestRoot)
     {
