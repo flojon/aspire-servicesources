@@ -842,6 +842,14 @@ exception is a group-level `"source": "path"` entry, which supplies the director
 `path:` is the author's own layout, so a member on `"path"` that declares one keeps it; only a developer's
 `path.path` (or `repository.path`) beats the group.
 
+## Submodules
+
+A managed checkout is cloned without `--recurse-submodules`, so a repository's submodules are not
+initialised: their folders are empty. Clone each submodule on its own instead, as a service of its
+own repository. Each gets its own checkout, its own path, and its own [path-length
+budget](../troubleshooting.md), which also keeps a deeply nested submodule from pushing the parent's
+checkout over the Windows path limits.
+
 ## Working in git worktrees
 
 `git worktree add` checks out only tracked files, so an AppHost run from a linked worktree of its
