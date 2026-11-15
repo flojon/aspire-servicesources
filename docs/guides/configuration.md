@@ -220,16 +220,18 @@ port-forward` in front of something already running elsewhere, and a `"disabled"
 running at all, deliberately — so environment variables applied here would configure `kubectl`
 rather than the service, or configure nothing anyone will ever see. A `"url"`/`"kubernetes"`
 service is expected to be configured wherever it actually runs; a `"disabled"` one is expected to
-be switched back on first. This includes `WithHttpHealthCheck` — a `"kubernetes"` service's
-port-forward has a real local endpoint, but the call still dual-writes onto the `kubectl` process
-rather than the service behind it, so it's skipped the same as any other configuration call rather
-than treated as an exception alongside wait ordering.
+be switched back on first.
 
-The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
-`WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward` executable, and
-holding *that* back until a migration finishes is exactly what the AppHost asked for. Only
-configuration that would land on the wrong process is dropped. A `"url"` or `"disabled"` service
-skips wait ordering too, since neither has a registered resource for Aspire to hold back.
+There are two exceptions, both on a `"kubernetes"` service, and both still apply:
+
+- **Wait ordering.** `WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward`
+  executable, and holding *that* back until a migration finishes is exactly what the AppHost asked for.
+- **Health checks** (`WithHttpHealthCheck`, `WithHealthCheck`). The port-forward's resource is the
+  tunnel, so the check probes the service behind it, and `WaitFor(service)` then waits for it too.
+
+Only configuration that would land on the wrong process is dropped. A `"url"`, `"disabled"` or
+unconfigured service skips both exceptions, since none has a registered resource for Aspire to hold
+back or probe. A subclass of the health-check annotation, and every other annotation, is still skipped.
 
 That is this service waiting for something else. The other direction — something else waiting for
 *this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and `"disabled"` and honoured

@@ -114,6 +114,21 @@ A tunnel that is running but has not accepted a connection for 60s (typically a 
 pods behind it, which leaves `kubectl` running with the port closed) is logged once as a warning with
 `kubectl`'s last line. It is not restarted, and a consumer that `WaitFor`s the service stays held.
 
+**Health checks.** `WithHttpHealthCheck` and `WithHealthCheck` on a `"kubernetes"` service apply to the
+port-forward's resource and probe the service through the tunnel. `WaitFor` holds until the built-in TCP
+check **and** your check both pass. A failing check of yours shows in the dashboard health badge; it does
+not restart the tunnel, does not mark it `FailedToStart`, and does not raise the "no connection" warning,
+which follow only the tunnel's own check. Things to know:
+
+- A checked-in `WithHttpHealthCheck` sends real GET requests to whichever context
+  `servicesources.local.json` selects, with no credentials.
+- Over `https` the certificate is the pod's and the host name is `localhost`, so the default probe is
+  `Unhealthy` unless that certificate is trusted, and `WaitFor` then holds. Certificate validation is not
+  relaxed.
+- Aspire's default redirect handling applies, so a hostile workload could redirect the probe. That
+  residual risk is accepted.
+- The probe goes to a loopback port. If a foreign process holds that port, it answers the probe.
+
 This is deliberately modest:
 
 - Nothing is restarted when the developer stops the resource, when the AppHost is shutting down, or
