@@ -275,7 +275,7 @@ a value; use the delegate form for anything that should survive a source switch.
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
 native vocabulary — `withEnvironment`, `withReference`, `withArgs`, `withEndpoint`,
-`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`, `withHttpHealthCheck`,
+`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`,
 `withCommand`, `waitFor`, `waitForCompletion`, whether
 Aspire's own or shadowed in this package — projects onto the generated `addService(...)` handle
 exactly as it does in C#:
@@ -288,8 +288,7 @@ const payments = await builder
 ```
 
 Out-of-band sources (`"url"`, `"kubernetes"`, `"disabled"`) are skipped and logged exactly as on the C# side,
-including the wait-ordering exception for `waitFor`/`waitForCompletion` and the health-check exception
-for `withHttpHealthCheck` against a `"kubernetes"` service. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
+including the wait-ordering exception for `waitFor`/`waitForCompletion`. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
 Type System erases a generic method's type parameter to its constraint, which here is exactly the
 resource type being requested — so reaching a non-`dotnet` kind's own vocabulary from a guest
 language needs a native Aspire integration for that kind, the same as it would without this

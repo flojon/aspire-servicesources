@@ -100,15 +100,28 @@ internal static class Reachability
     /// all resolve to a lookup against this same annotation type, so a skip triggered by any of them
     /// is the identical capability, reported once under one label rather than three.
     /// </remarks>
-    public static string CapabilityLabel(Type annotationType) => annotationType.Name switch
+    public static string CapabilityLabel(Type annotationType)
     {
-        "EnvironmentAnnotation" or nameof(EnvironmentCallbackAnnotation) => "WithEnvironment",
-        nameof(CommandLineArgsCallbackAnnotation) => "WithArgs",
-        nameof(EndpointAnnotation) => "WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint",
-        nameof(WaitAnnotation) => "WaitFor/WaitForCompletion",
-        nameof(HealthCheckAnnotation) => "WithHealthCheck/WithHttpHealthCheck",
-        _ => annotationType.Name,
-    };
+        // Walk bases so a subclass reports its capability's method, not its own type name.
+        for (var type = annotationType; type is not null; type = type.BaseType)
+        {
+            var label = type.Name switch
+            {
+                "EnvironmentAnnotation" or nameof(EnvironmentCallbackAnnotation) => "WithEnvironment",
+                nameof(CommandLineArgsCallbackAnnotation) => "WithArgs",
+                nameof(EndpointAnnotation) => "WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint",
+                nameof(WaitAnnotation) => "WaitFor/WaitForCompletion",
+                nameof(HealthCheckAnnotation) => "WithHealthCheck/WithHttpHealthCheck",
+                _ => null,
+            };
+            if (label is not null)
+            {
+                return label;
+            }
+        }
+
+        return annotationType.Name;
+    }
 }
 
 /// <summary>
@@ -157,9 +170,15 @@ internal sealed class ServiceResourceBuilder(
         // `real is not null` (as an earlier draft of this design did) would silently apply every
         // annotation to the facade alone for "url", with no warning at all — the opposite of
         // Configure<T>'s preserved skip-with-warning behaviour.
-        // The runtime type too: a subclass passed under a reachable base type argument must not slip through.
-        var gatedType = Reachability.IsUnreachable(typeof(TAnnotation), source) ? typeof(TAnnotation) : annotation.GetType();
-        if (Reachability.IsUnreachable(typeof(TAnnotation), source) || Reachability.IsUnreachable(annotation.GetType(), source))
+        ArgumentNullException.ThrowIfNull(annotation);
+
+        // The runtime type too: a subclass passed under a reachable base type argument must not slip
+        // through. Derived decoration types fail closed the same way, with a warning.
+        var runtimeType = annotation.GetType();
+        var gatedType = Reachability.IsUnreachable(typeof(TAnnotation), source) ? typeof(TAnnotation)
+            : Reachability.IsUnreachable(runtimeType, source) ? runtimeType
+            : null;
+        if (gatedType is not null)
         {
             ServiceSourcesWarnings.For(ApplicationBuilder)
                 .AddSkip(Resource.Name, source, Reachability.CapabilityLabel(gatedType));
@@ -167,8 +186,9 @@ internal sealed class ServiceResourceBuilder(
         }
 
         // A resource carries many health checks, so Replace would drop the tunnel's own (or throw
-        // on two); the supervisor needs the tunnel's report to release WaitFor.
-        if (annotation is HealthCheckAnnotation && string.Equals(source, "kubernetes", StringComparison.Ordinal))
+        // on two); the supervisor needs the tunnel's report to release WaitFor. Exact type: the gate
+        // above already skipped subclasses.
+        if (runtimeType == typeof(HealthCheckAnnotation) && string.Equals(source, "kubernetes", StringComparison.Ordinal))
         {
             behavior = ResourceAnnotationMutationBehavior.Append;
         }

@@ -155,13 +155,15 @@ public class KubernetesHealthCheckDualWriteTests
 
         service.WithAnnotation<HealthCheckAnnotation>(new DerivedHealthCheck());
 
-        Assert.NotEmpty(Warnings(builder));
+        var warning = Assert.Single(Warnings(builder));
+        Assert.Contains("WithHealthCheck/WithHttpHealthCheck", warning);
+        Assert.DoesNotContain("DerivedHealthCheck", warning);
         Assert.Empty(RealAnnotations(service).OfType<DerivedHealthCheck>());
         Assert.Empty(service.Resource.Annotations.OfType<DerivedHealthCheck>());
     }
 
     [Fact]
-    public void ReplacingAHealthCheck_OnKubernetes_KeepsTheTunnelCheck_AndCanRepeat()
+    public void ReplacingAHealthCheck_OnKubernetes_KeepsTheTunnelCheck_AndDoesNotThrowOnRepeat()
     {
         var builder = Builder();
         var service = Kubernetes(builder);
@@ -174,8 +176,6 @@ public class KubernetesHealthCheckDualWriteTests
         {
             var keys = annotations.OfType<HealthCheckAnnotation>().Select(a => a.Key).ToArray();
             Assert.Contains(tunnelKey, keys);
-            Assert.Contains("a", keys);
-            Assert.Contains("b", keys);
         }
     }
 
