@@ -148,6 +148,38 @@ public class KubernetesHealthCheckDualWriteTests
     }
 
     [Fact]
+    public void ASubclassPassedUnderTheBaseTypeArgument_OnKubernetes_IsSkipped()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        service.WithAnnotation<HealthCheckAnnotation>(new DerivedHealthCheck());
+
+        Assert.NotEmpty(Warnings(builder));
+        Assert.Empty(RealAnnotations(service).OfType<DerivedHealthCheck>());
+        Assert.Empty(service.Resource.Annotations.OfType<DerivedHealthCheck>());
+    }
+
+    [Fact]
+    public void ReplacingAHealthCheck_OnKubernetes_KeepsTheTunnelCheck_AndCanRepeat()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var tunnelKey = KubernetesSource.HealthCheckKey("orders");
+
+        service.WithAnnotation(new HealthCheckAnnotation("a"), ResourceAnnotationMutationBehavior.Replace);
+        service.WithAnnotation(new HealthCheckAnnotation("b"), ResourceAnnotationMutationBehavior.Replace);
+
+        foreach (var annotations in new[] { RealAnnotations(service), service.Resource.Annotations })
+        {
+            var keys = annotations.OfType<HealthCheckAnnotation>().Select(a => a.Key).ToArray();
+            Assert.Contains(tunnelKey, keys);
+            Assert.Contains("a", keys);
+            Assert.Contains("b", keys);
+        }
+    }
+
+    [Fact]
     public void AHealthCheckAnnotationAddedDirectlyToTheFacade_OnKubernetes_IsForwardedToTheReal()
     {
         var builder = Builder();

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -56,10 +57,11 @@ internal static class Reachability
     // to the kubectl process; (b) acting on the real resource measures or orders the service behind
     // the tunnel; (c) no invariant elsewhere assumes it unreachable. Keyed by source so an entry
     // cannot leak to another source.
-    private static readonly Dictionary<string, HashSet<Type>> ReachableBySource = new(StringComparer.Ordinal)
-    {
-        ["kubernetes"] = [typeof(WaitAnnotation), typeof(HealthCheckAnnotation)],
-    };
+    private static readonly FrozenDictionary<string, FrozenSet<Type>> ReachableBySource =
+        new Dictionary<string, FrozenSet<Type>>(StringComparer.Ordinal)
+        {
+            ["kubernetes"] = new[] { typeof(WaitAnnotation), typeof(HealthCheckAnnotation) }.ToFrozenSet(),
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>
     /// Whether an annotation of <paramref name="annotationType"/> cannot reach the service behind
@@ -155,11 +157,20 @@ internal sealed class ServiceResourceBuilder(
         // `real is not null` (as an earlier draft of this design did) would silently apply every
         // annotation to the facade alone for "url", with no warning at all — the opposite of
         // Configure<T>'s preserved skip-with-warning behaviour.
-        if (Reachability.IsUnreachable(typeof(TAnnotation), source))
+        // The runtime type too: a subclass passed under a reachable base type argument must not slip through.
+        var gatedType = Reachability.IsUnreachable(typeof(TAnnotation), source) ? typeof(TAnnotation) : annotation.GetType();
+        if (Reachability.IsUnreachable(typeof(TAnnotation), source) || Reachability.IsUnreachable(annotation.GetType(), source))
         {
             ServiceSourcesWarnings.For(ApplicationBuilder)
-                .AddSkip(Resource.Name, source, Reachability.CapabilityLabel(typeof(TAnnotation)));
+                .AddSkip(Resource.Name, source, Reachability.CapabilityLabel(gatedType));
             return this;
+        }
+
+        // A resource carries many health checks, so Replace would drop the tunnel's own (or throw
+        // on two); the supervisor needs the tunnel's report to release WaitFor.
+        if (annotation is HealthCheckAnnotation && string.Equals(source, "kubernetes", StringComparison.Ordinal))
+        {
+            behavior = ResourceAnnotationMutationBehavior.Append;
         }
 
         // Mirrors Aspire's own DistributedApplicationResourceBuilder<T>.WithAnnotation exactly:

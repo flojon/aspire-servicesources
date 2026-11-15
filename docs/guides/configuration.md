@@ -231,7 +231,10 @@ There are two exceptions, both on a `"kubernetes"` service, and both still apply
 
 Only configuration that would land on the wrong process is dropped. A `"url"`, `"disabled"` or
 unconfigured service skips both exceptions, since none has a registered resource for Aspire to hold
-back or probe. A subclass of the health-check annotation, and every other annotation, is still skipped.
+back or probe. A subclass of the health-check annotation, and every other annotation, is still skipped,
+including other Aspire extension methods that add annotations. Only the native `WithHttpHealthCheck` and
+`WithHealthCheck` calls apply: `Unwrap<IResourceWithEndpoints>(r => r.WithHttpHealthCheck())` is still
+skipped on a `"kubernetes"` service.
 
 That is this service waiting for something else. The other direction — something else waiting for
 *this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and `"disabled"` and honoured
@@ -272,8 +275,8 @@ a value; use the delegate form for anything that should survive a source switch.
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
 native vocabulary — `withEnvironment`, `withReference`, `withArgs`, `withEndpoint`,
-`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`, `withCommand`, `waitFor`,
-`waitForCompletion`, whether
+`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`, `withHttpHealthCheck`,
+`withCommand`, `waitFor`, `waitForCompletion`, whether
 Aspire's own or shadowed in this package — projects onto the generated `addService(...)` handle
 exactly as it does in C#:
 
@@ -285,8 +288,8 @@ const payments = await builder
 ```
 
 Out-of-band sources (`"url"`, `"kubernetes"`, `"disabled"`) are skipped and logged exactly as on the C# side,
-including the wait-ordering exception for `waitFor`/`waitForCompletion` against a `"kubernetes"`
-service. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
+including the wait-ordering exception for `waitFor`/`waitForCompletion` and the health-check exception
+for `withHttpHealthCheck` against a `"kubernetes"` service. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
 Type System erases a generic method's type parameter to its constraint, which here is exactly the
 resource type being requested — so reaching a non-`dotnet` kind's own vocabulary from a guest
 language needs a native Aspire integration for that kind, the same as it would without this

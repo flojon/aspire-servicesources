@@ -60,8 +60,7 @@ never existed. Check the tag of the last release before adding one.
 
 - **A health check on a `"kubernetes"` service now applies instead of being skipped** ([#399]).
   `WithHttpHealthCheck` and `WithHealthCheck` reach the port-forward's resource, so `WaitFor(service)`
-  also waits for the author's check. A failing author check no longer reads as a dead tunnel: the
-  "no connection" warning follows only the tunnel's own check. `"url"`, `"disabled"` and unconfigured
+  also waits for the author's check. `"url"`, `"disabled"` and unconfigured
   services still skip the call. Remove a `WithHttpHealthCheck` that was only there to be skipped.
 - **The error for `source: repository` on a service whose catalog entry has no repository now offers
   a switch to `url`, `container` or `kubernetes` again, but only where that source would actually

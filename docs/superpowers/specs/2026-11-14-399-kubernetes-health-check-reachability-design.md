@@ -107,7 +107,7 @@ denylist; adding to the kubernetes allowance is a deliberate, tested edit, never
   service", including the paragraph that says `WithHttpHealthCheck` is skipped and the "one exception"
   paragraph) and `docs/sources/kubernetes.md` change to match; `CHANGELOG.md` gets a **Changed** entry
   (behaviour change: a call that used to be skipped now applies).
-- `ServiceConfigurationExtensions.IsUnreachable<T>` is not changed: there is no capability interface for
+- `ServiceConfigurationExtensions.IsUnreachable<T>` is not changed in behaviour (its visibility becomes `internal`, only so the agreement test can reach it): there is no capability interface for
   health checks to key on, so `Unwrap<T>` has nothing to carve out. It keeps its own hard-coded
   `IResourceWithWaitSupport` carve-out, so the allowance lives in two places (annotation type here,
   capability type there); a test asserts the two agree on `WaitFor` for every source.
@@ -239,8 +239,8 @@ and (c) no invariant elsewhere in this package assumes it is unreachable.
 
 ## 8. Test plan (outline, for the Plan step)
 
-Traits: the new tests are in-memory with no real process, so no `IO`/`Concurrency`/`Timing` trait. Any test that
-starts a built host follows the CLAUDE.md trait table.
+Traits: `ReachabilityTests` and the supervisor tests keep their existing class traits. `KubernetesHealthCheckDualWriteTests`
+builds a real host under a temporary directory, so it carries `[Trait("IO", "true")]` per the CLAUDE.md trait table.
 
 - `ReachabilityTests`: matrix of {`url`, `kubernetes`, `disabled`, unconfigured} x {`WaitAnnotation`,
   `HealthCheckAnnotation`, a subclass of `HealthCheckAnnotation`, `EnvironmentCallbackAnnotation`,
@@ -267,3 +267,10 @@ starts a built host follows the CLAUDE.md trait table.
 Backing services (`KubernetesBackingServiceSource`) attach their own checks and are untouched. A future
 `IResourceWithProbes` on the real resource is not reachable through the facade. New public API; changing how Aspire builds or sends the HTTP probe; certificate handling; any annotation type
 besides `HealthCheckAnnotation`; the `"url"` source.
+
+
+## Review round 2 amendments
+
+- `WithAnnotation<TAnnotation>` gates on both the static type argument and the annotation's runtime type, so a subclass passed under `HealthCheckAnnotation` is skipped like the facade-diff path.
+- On `"kubernetes"`, a `Replace` of a `HealthCheckAnnotation` is treated as `Append`: a resource carries many checks, and replacing would drop the tunnel's own.
+- `ReachableBySource` is a `FrozenDictionary` of `FrozenSet`.
