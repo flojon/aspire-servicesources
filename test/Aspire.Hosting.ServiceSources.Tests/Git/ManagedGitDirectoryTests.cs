@@ -280,11 +280,11 @@ public class ManagedGitDirectoryTests
     public void Resolve_GitRootOver149_StillResolvesAnExistingCheckout()
     {
         var temp = TempDirectories.CreateSubdirectory().FullName;
-        var managed = NewManagedUnder(Path.Combine(temp, new string('d', PackPathLimit.MaxGitRootLength)));
+        var managed = NewManagedUnder(Path.Combine(temp, new string('d', GitPathLimit.MaxGitRootLength)));
 
         var result = ManagedGitDirectory.Resolve(managed.RepoRoot, managed.GitRoot);
 
-        Assert.True(managed.GitRoot.Length > PackPathLimit.MaxGitRootLength);
+        Assert.True(managed.GitRoot.Length > GitPathLimit.MaxGitRootLength);
         Assert.Equal(managed.GitDirectory, result.GitDirectory);
     }
 

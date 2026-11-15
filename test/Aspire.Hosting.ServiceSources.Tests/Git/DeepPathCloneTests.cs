@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Aspire.Hosting.ServiceSources.Git;
 using Xunit;
 using static Aspire.Hosting.ServiceSources.Tests.Git.LocalGitCheckoutSeparateTests;
@@ -5,14 +6,14 @@ using static Aspire.Hosting.ServiceSources.Tests.Git.LocalGitCheckoutSeparateTes
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
 /// <summary>
-/// The real thing on Windows, with an AppHost directory too deep for the in-place pack path and
+/// The real thing on Windows, with an AppHost directory too deep for git to keep its git directory in place and
 /// nothing forced: the layout is decided from the lengths, and git runs for real.
 /// </summary>
 [Trait("IO", "true")]
 public class DeepPathCloneTests
 {
     // A staging root is this plus '\.servicesources\checkouts\.incoming-xxxxxxxx' (46), so 185 leaves
-    // it under the 235 ceiling and well over the 174 an in-place pack path allows.
+    // it under the 235 ceiling and well over the 215 an in-place git directory allows.
     private const int DeepAppHostLength = 185;
 
     private static LocalGitCheckoutSeparateTests.Environment DeepEnvironment(int length = DeepAppHostLength, string? gitRoot = null)
@@ -74,6 +75,72 @@ public class DeepPathCloneTests
         Assert.Equal(2, worktree.GitDirectories.Length);
         Assert.DoesNotContain("Filename too long", GitIn(worktree.Checkout, "status").Err, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(worktree.GitDirectories.Single(d => d != home.GitDirectories[0]), "objects", "info", "alternates")));
+    }
+
+    private static (int ExitCode, string Err) PlainClone(string destination)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = System.IO.Path.GetTempPath(),
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[] { "-c", "core.longpaths=true", "clone", "--quiet", "--no-local", OriginUrl(), destination })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var (name, value) in TestRepository.IsolatedEnvironment())
+        {
+            startInfo.Environment[name] = value;
+        }
+
+        using var process = Process.Start(startInfo)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, stderr.Result);
+    }
+
+    private static string DestinationOfLength(int length)
+    {
+        var temp = TempDirectories.CreateSubdirectory().FullName;
+        return System.IO.Path.Combine(temp, new string('p', length - temp.Length - 1));
+    }
+
+    // Pins git's own PATH_MAX - 40 check on git 2.52.0.windows.1, which the layout decision models.
+    [WindowsFact]
+    public void PlainClone_Succeeds_AtTheInPlaceLimit()
+    {
+        var destination = DestinationOfLength(GitPathLimit.MaxInPlaceRootLength);
+
+        var (exitCode, err) = PlainClone(destination);
+
+        Assert.True(exitCode == 0, err);
+        Assert.DoesNotContain("too big", err, StringComparison.Ordinal);
+    }
+
+    [WindowsFact]
+    public void PlainClone_Fails_OneOverTheInPlaceLimit_WithGitDirTooBig()
+    {
+        var destination = DestinationOfLength(GitPathLimit.MaxInPlaceRootLength + 1);
+
+        var (exitCode, err) = PlainClone(destination);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("'$GIT_DIR' too big", err, StringComparison.Ordinal);
+    }
+
+    [WindowsFact]
+    public void SeparateGitDir_ClonesAtTheCeiling()
+    {
+        var environment = DeepEnvironment(length: GitPathLimit.MaxWorkingTreeRootLength - 46);
+
+        PrepareManaged(environment, RealGit(), OriginUrl());
+
+        Assert.Single(environment.GitDirectories);
+        Assert.DoesNotContain("Filename too long", GitIn(environment.Checkout, "status").Err, StringComparison.Ordinal);
     }
 
     [WindowsFact]

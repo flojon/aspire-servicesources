@@ -93,7 +93,7 @@ public class LocalGitCheckoutExistingSitesTests
     }
 
     [Fact]
-    public void Reconcile_InPlaceCheckoutWhosePackPathWouldNotFit_LogsNoticeNamingDeleteAndReclone()
+    public void Reconcile_InPlaceCheckoutWhoseGitDirWouldBeTooBig_LogsNoticeNamingDeleteAndReclone()
     {
         var temp = TempDirectories.CreateSubdirectory().FullName;
         var layout = new CloneLayoutOptions(Path.Combine(temp, "gitroot"), IsWindows: true);
@@ -107,6 +107,29 @@ public class LocalGitCheckoutExistingSitesTests
         Assert.Contains("delete", notice, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(Path.Combine("checkouts", "orders"), notice, StringComparison.Ordinal);
         Assert.Contains("re-run", notice, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(215, 0)]
+    [InlineData(216, 1)]
+    public void Reconcile_InPlaceCheckout_NoticeFollowsTheGitDirBoundary(int checkoutLength, int expectedNotices)
+    {
+        var temp = TempDirectories.CreateSubdirectory().FullName;
+        var layout = new CloneLayoutOptions(Path.Combine(temp, "gitroot"), IsWindows: true);
+        var probe = new LocalGitCheckoutSeparateTests.Environment(temp, layout.GitRoot!, layout);
+        var padding = checkoutLength - probe.Checkout.Length;
+        var environment = probe with { AppHost = temp + new string('a', padding) };
+        Assert.Equal(checkoutLength, environment.Checkout.Length);
+        Directory.CreateDirectory(Path.Combine(environment.Checkout, ".git"));
+        var notices = new List<string>();
+
+        Reconcile(environment, new ScriptedCloneGitClient(), notices);
+
+        Assert.Equal(expectedNotices, notices.Count);
+        if (expectedNotices > 0)
+        {
+            Assert.Contains("'$GIT_DIR' too big", notices[0], StringComparison.Ordinal);
+        }
     }
 
     [Fact]

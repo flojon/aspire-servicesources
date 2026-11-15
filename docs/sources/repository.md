@@ -74,7 +74,7 @@ the `"path"` spelling to paste instead.)
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work. On Windows, an AppHost directory too deep for git's pack files gets a clone
+  overwriting your work. On Windows, an AppHost directory too deep for git to keep its git directory in the checkout gets a clone
   whose `.git` is a file pointing at a short git directory under `%LOCALAPPDATA%\ServiceSources\git`
   (see [Troubleshooting](../troubleshooting.md#long-paths-on-windows)); a `.git` file this tool wrote
   itself is recognised. Anything else you put at that path yourself that isn't a plain clone — a

@@ -432,10 +432,10 @@ internal static class LocalGitCheckout
         if (Directory.Exists(Path.Combine(repoRoot, ".git")))
         {
             if ((layout.IsWindows ?? OperatingSystem.IsWindows())
-                && PackPathLimit.Required(repoRoot, repoRoot, out _) > PackPathLimit.MaxPathLength)
+                && Path.GetFullPath(repoRoot).Length > GitPathLimit.MaxInPlaceRoot(layout.GitDirLimit))
             {
                 notice?.Invoke(Raw.Compose(
-                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows to repack there, so a fetch or gc may fail with 'Filename too long'. It is not moved. If it has local changes or unpushed commits, move '{Raw.Display(Path.Combine("checkouts", Path.GetFileName(repoRoot)))}' out of the AppHost's '.servicesources' directory; otherwise delete it. Then re-run to have it cloned again with a short separate git directory. This needs an AppHost path short enough for the working tree itself (about 190 characters, less for a long checkout name); beyond that, move the AppHost to a shorter path."));
+                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows: every git command in it fails with \"'$GIT_DIR' too big\". It is not moved. If it has local changes or unpushed commits, move '{Raw.Display(Path.Combine("checkouts", Path.GetFileName(repoRoot)))}' out of the AppHost's '.servicesources' directory; otherwise delete it. Then re-run to have it cloned again with a short separate git directory. This needs an AppHost path short enough for the working tree itself (about 189 characters, less for a long checkout name); beyond that, move the AppHost to a shorter path."));
             }
 
             return;

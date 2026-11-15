@@ -31,13 +31,14 @@ has `core.longpaths=true` in its own git config, so plain `git status` and your 
 
 ### Deep AppHost directories: the git directory moves out of the checkout
 
-`core.longpaths` does not cover pack files: git fails to write one whose whole path passes 259
-characters, whatever `LongPathsEnabled` says. The longest is the temporary pack a repack writes,
-`.git\objects\pack\.tmp-<pid>-pack-<hash>.pack` (85 characters below the clone root). A clone
-repacks when it borrows objects from the main worktree's checkout, and `git gc --auto` repacks
-during later fetches, so the clone has to leave room for it.
+git refuses to run in a repository whose git directory path is longer than 220 characters, failing every
+command with `fatal: '$GIT_DIR' too big`, whatever `core.longpaths` or `LongPathsEnabled` say. The limit
+is `PATH_MAX - 40` in git's `setup.c`, with Git for Windows' `PATH_MAX` of 260, so it is fixed when git is
+built and cannot be configured. It was measured on git 2.52.0.windows.1 only; other versions are not known
+to behave the same. For a checkout the git directory is the checkout path plus 5 characters (`\.git`), so a
+checkout path of 215 characters or fewer works in place and 216 or more does not.
 
-When the AppHost directory is deep enough that it would not fit (more than about 129 characters),
+When the AppHost directory is deep enough that it would not fit (more than 169 characters),
 the clone is made with `git clone --separate-git-dir`. The working tree stays at
 `<AppHost>\.servicesources\checkouts\<name>`, and its `.git` is a file that points at a short git
 directory under `%LOCALAPPDATA%\ServiceSources\git`. Plain `git` and your IDE work in the checkout
@@ -57,18 +58,19 @@ as usual. A shallower AppHost is cloned exactly as before, with `.git` inside th
 Even with the git directory elsewhere, git for Windows cannot work in a working tree whose own
 directory path is past about 235 characters (the clone is staged under `.incoming-<8 hex>`, a 19-character
 segment including the backslash, so for a checkout name of up to 18 characters the staging path is
-the one that counts). For such a name that is an AppHost directory of about 190 characters. Beyond it the error
+the one that counts). For such a name that is an AppHost directory of 189 characters. Beyond it the error
 names the length and how many characters to remove; move the AppHost, or the worktree it is in, to a
 shorter path. If `%LOCALAPPDATA%` is unavailable or its `ServiceSources\git` folder would itself be
-too long, a deep AppHost is refused with the pack-file wording instead (the path would need N
-characters, against 259).
+too long, a deep AppHost is refused with the `'$GIT_DIR' too big` wording instead (it needs a path of
+at most 215 characters, so that git can keep its git directory in the checkout).
 
 ### A checkout made before the git directory moved out is too deep to maintain
 
 An existing checkout is never moved. If its git directory is still inside it and its path is too deep
-for git to repack there, a start logs a notice: a fetch or `gc` may fail with `Filename too long`.
+for git (a checkout path past 215 characters), a start logs a notice: every git command in it fails
+with `'$GIT_DIR' too big`.
 If it has local changes or unpushed commits, move `.servicesources\checkouts\<name>` out of the AppHost; otherwise delete it.
-Then re-run, and it is cloned again with a short git directory (this needs an AppHost path within the limit above).
+Then re-run, and it is cloned again with a short git directory (this needs an AppHost path within the limit above, 189 characters for a checkout name of 18 characters or fewer).
 
 ## Getting the full exception detail
 

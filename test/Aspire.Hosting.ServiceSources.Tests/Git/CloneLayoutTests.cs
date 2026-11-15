@@ -19,17 +19,48 @@ public class CloneLayoutTests
     private static CloneLayoutOptions Windows(string? gitRoot = UsableRoot) => new(gitRoot, IsWindows: true);
 
     [Fact]
-    public void LongestPackFileInGitDir_Is80Characters()
+    public void Boundaries_Are215InPlace_235Ceiling()
     {
-        Assert.Equal(80, PackPathLimit.LongestPackFileInGitDir.Length);
-        Assert.Equal(235, PackPathLimit.MaxWorkingTreeRootLength);
-        Assert.Equal(149, PackPathLimit.MaxGitRootLength);
+        Assert.Equal(215, GitPathLimit.MaxInPlaceRootLength);
+        Assert.Equal(235, GitPathLimit.MaxWorkingTreeRootLength);
+        Assert.Equal(190, GitPathLimit.MaxGitRootLength);
+    }
+
+    [Theory]
+    [InlineData(215, true)]
+    [InlineData(216, false)]
+    [InlineData(235, false)]
+    public void Windows_DecidesByRootLength(int length, bool inPlace)
+    {
+        var root = RootOfLength(length);
+
+        Assert.Equal(
+            inPlace ? CloneLayoutKind.InPlace : CloneLayoutKind.Separate,
+            CloneLayout.Decide(Label, root, root, Windows()));
+    }
+
+    [Fact]
+    public void Windows_236_IsRefused()
+    {
+        var root = RootOfLength(236);
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => CloneLayout.Decide(Label, root, root, Windows()));
+    }
+
+    [Fact]
+    public void Windows_InjectedGitDirLimit_MovesTheInPlaceBoundary()
+    {
+        var root = RootOfLength(100);
+        var options = new CloneLayoutOptions(UsableRoot, IsWindows: true, GitDirLimit: 104);
+
+        Assert.Equal(CloneLayoutKind.Separate, CloneLayout.Decide(Label, root, root, options));
+        Assert.Equal(CloneLayoutKind.InPlace, CloneLayout.Decide(Label, root, root, options with { GitDirLimit = 105 }));
     }
 
     [Fact]
     public void Windows_AtInPlaceLimit_IsInPlace()
     {
-        var root = RootOfLength(PackPathLimit.MaxCloneRootLength);
+        var root = RootOfLength(GitPathLimit.MaxInPlaceRootLength);
 
         Assert.Equal(CloneLayoutKind.InPlace, CloneLayout.Decide(Label, root, root, Windows()));
     }
@@ -37,7 +68,7 @@ public class CloneLayoutTests
     [Fact]
     public void Windows_OneOverInPlaceLimit_IsSeparate()
     {
-        var root = RootOfLength(PackPathLimit.MaxCloneRootLength + 1);
+        var root = RootOfLength(GitPathLimit.MaxInPlaceRootLength + 1);
 
         Assert.Equal(CloneLayoutKind.Separate, CloneLayout.Decide(Label, root, root, Windows()));
     }
@@ -45,7 +76,7 @@ public class CloneLayoutTests
     [Fact]
     public void Windows_AtCeiling_IsSeparate()
     {
-        var root = RootOfLength(PackPathLimit.MaxWorkingTreeRootLength);
+        var root = RootOfLength(GitPathLimit.MaxWorkingTreeRootLength);
 
         Assert.Equal(CloneLayoutKind.Separate, CloneLayout.Decide(Label, root, root, Windows()));
     }
@@ -53,13 +84,13 @@ public class CloneLayoutTests
     [Fact]
     public void Windows_OneOverCeiling_Throws()
     {
-        var root = RootOfLength(PackPathLimit.MaxWorkingTreeRootLength + 1);
+        var root = RootOfLength(GitPathLimit.MaxWorkingTreeRootLength + 1);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => CloneLayout.Decide(Label, root, root, Windows()));
 
         Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
-        Assert.Contains((PackPathLimit.MaxWorkingTreeRootLength + 1).ToString(), ex.Message, StringComparison.Ordinal);
+        Assert.Contains((GitPathLimit.MaxWorkingTreeRootLength + 1).ToString(), ex.Message, StringComparison.Ordinal);
         Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Move the AppHost", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(".tmp-<pid>-pack", ex.Message, StringComparison.Ordinal);
@@ -69,7 +100,7 @@ public class CloneLayoutTests
     public void Windows_UsesTheLongerOfFinalAndStaging()
     {
         var final = RootOfLength(50);
-        var staging = RootOfLength(PackPathLimit.MaxWorkingTreeRootLength + 5);
+        var staging = RootOfLength(GitPathLimit.MaxWorkingTreeRootLength + 5);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => CloneLayout.Decide(Label, final, staging, Windows()));
@@ -81,34 +112,34 @@ public class CloneLayoutTests
     public void Windows_StagingLongerThanInPlaceLimit_IsSeparateEvenWhenFinalFits()
     {
         var final = RootOfLength(50);
-        var staging = RootOfLength(PackPathLimit.MaxCloneRootLength + 1);
+        var staging = RootOfLength(GitPathLimit.MaxInPlaceRootLength + 1);
 
         Assert.Equal(CloneLayoutKind.Separate, CloneLayout.Decide(Label, final, staging, Windows()));
     }
 
     [Fact]
-    public void Windows_GitRootNull_OverInPlaceLimit_ThrowsWithPackPathNumbers()
+    public void Windows_GitRootNull_OverInPlaceLimit_ThrowsWithGitDirNumbers()
     {
-        var root = RootOfLength(PackPathLimit.MaxCloneRootLength + 1);
+        var root = RootOfLength(GitPathLimit.MaxInPlaceRootLength + 1);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => CloneLayout.Decide(Label, root, root, Windows(gitRoot: null)));
 
-        Assert.Contains("85", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("259", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'$GIT_DIR' too big", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("220", ex.Message, StringComparison.Ordinal);
         Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Windows_GitRootOver149_IsUnusable()
+    public void Windows_GitRootOver190_IsUnusable()
     {
-        var root = RootOfLength(PackPathLimit.MaxCloneRootLength + 1);
-        var longGitRoot = RootOfLength(PackPathLimit.MaxGitRootLength + 1);
+        var root = RootOfLength(GitPathLimit.MaxInPlaceRootLength + 1);
+        var longGitRoot = RootOfLength(GitPathLimit.MaxGitRootLength + 1);
 
         Assert.Throws<ServiceSourcesConfigurationException>(
             () => CloneLayout.Decide(Label, root, root, Windows(longGitRoot)));
 
-        var fittingGitRoot = RootOfLength(PackPathLimit.MaxGitRootLength);
+        var fittingGitRoot = RootOfLength(GitPathLimit.MaxGitRootLength);
         Assert.Equal(CloneLayoutKind.Separate, CloneLayout.Decide(Label, root, root, Windows(fittingGitRoot)));
     }
 
@@ -123,7 +154,7 @@ public class CloneLayoutTests
     [Fact]
     public void NotWindows_IsInPlaceWhateverTheLength()
     {
-        var root = RootOfLength(PackPathLimit.MaxWorkingTreeRootLength + 100);
+        var root = RootOfLength(GitPathLimit.MaxWorkingTreeRootLength + 100);
 
         Assert.Equal(
             CloneLayoutKind.InPlace,
@@ -133,7 +164,7 @@ public class CloneLayoutTests
     [Fact]
     public void ForceSeparate_BeyondCeiling_StillThrows()
     {
-        var root = RootOfLength(PackPathLimit.MaxWorkingTreeRootLength + 1);
+        var root = RootOfLength(GitPathLimit.MaxWorkingTreeRootLength + 1);
 
         Assert.Throws<ServiceSourcesConfigurationException>(
             () => CloneLayout.Decide(Label, root, root, new CloneLayoutOptions(UsableRoot, IsWindows: true, ForceSeparate: true)));

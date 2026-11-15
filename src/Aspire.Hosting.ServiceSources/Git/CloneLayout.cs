@@ -11,7 +11,12 @@ internal enum CloneLayoutKind
 /// <param name="GitRoot">Where separate git directories live; <see langword="null"/> when there is no usable one.</param>
 /// <param name="IsWindows">Defaults to the running OS; injectable so the decision is testable anywhere.</param>
 /// <param name="ForceSeparate">Replaces the Windows gate and the in-place fit, so other platforms can exercise the separate layout.</param>
-internal sealed record CloneLayoutOptions(string? GitRoot, bool? IsWindows = null, bool ForceSeparate = false)
+/// <param name="GitDirLimit">The longest git directory path git accepts; injectable because it is a compile-time constant of the git build.</param>
+internal sealed record CloneLayoutOptions(
+    string? GitRoot,
+    bool? IsWindows = null,
+    bool ForceSeparate = false,
+    int GitDirLimit = GitPathLimit.MaxGitDirLength)
 {
     public static CloneLayoutOptions Default => new(SeparateGitDirectories.DefaultRoot());
 }
@@ -28,22 +33,22 @@ internal static class CloneLayout
             return CloneLayoutKind.InPlace;
         }
 
-        var required = PackPathLimit.Required(checkoutPath, stagingPath, out var longestRoot);
-        if (!options.ForceSeparate && required <= PackPathLimit.MaxPathLength)
+        var longestRoot = GitPathLimit.LongestRoot(checkoutPath, stagingPath);
+        if (!options.ForceSeparate && longestRoot.Length <= GitPathLimit.MaxInPlaceRoot(options.GitDirLimit))
         {
             return CloneLayoutKind.InPlace;
         }
 
-        if (longestRoot.Length > PackPathLimit.MaxWorkingTreeRootLength)
+        if (longestRoot.Length > GitPathLimit.MaxWorkingTreeRootLength)
         {
-            var excess = longestRoot.Length - PackPathLimit.MaxWorkingTreeRootLength;
+            var excess = longestRoot.Length - GitPathLimit.MaxWorkingTreeRootLength;
             throw ServiceSourcesConfigurationException.For(
-                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot run in a working tree whose directory path is past about {PackPathLimit.MaxWorkingTreeRootLength} characters without the long-path opt-in, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
+                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot run in a working tree whose directory path is past about {GitPathLimit.MaxWorkingTreeRootLength} characters without the long-path opt-in, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
         }
 
-        if (!PackPathLimit.IsUsableGitRoot(options.GitRoot))
+        if (!GitPathLimit.IsUsableGitRoot(options.GitRoot))
         {
-            throw PackPathLimit.PackPathRefusal(label, checkoutPath, longestRoot);
+            throw GitPathLimit.GitRootRefusal(label, checkoutPath, longestRoot, options.GitDirLimit);
         }
 
         return CloneLayoutKind.Separate;

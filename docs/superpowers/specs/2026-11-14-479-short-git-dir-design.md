@@ -3,21 +3,35 @@
 **Date:** 2026-11-14
 **Status:** Approved
 **Resolves:** #479 (a managed `repository` clone is refused on Windows once the AppHost directory passes
-about 129 characters, because git cannot write a pack file past MAX_PATH).
-**Relates to:** #474 / #483 (the pack-path check), #477 (its refusal message), #488 (the repack temp file
+about 129 characters; the cause was first modelled as a pack-file path limit, which the note below corrects).
+**Relates to:** #474 / #483 (the pack-path check, whose model was wrong), #477 (its refusal message), #488 (the repack temp file
 sizing), #466 (`core.longpaths`), #475 (relocating all checkouts; not done here).
 **Measured against:** git `2.52.0.windows.1`, Windows 11, `LongPathsEnabled=0`, `core.longpaths=true`,
 a throwaway one-commit repository cloned with `--dissociate --reference-if-able` and
 `--separate-git-dir`. The probe was deleted afterwards; section 2 is the record.
 
+> **Round 3 correction (threshold).** Earlier revisions of this spec said git cannot write a pack file
+> past 259 characters and put the in-place limit at `root + 85 <= 259`, a root of 174. That was wrong.
+> Measured later on the same git, with plain `git clone --no-local`: an in-place clone works when the
+> checkout path is 215 characters or fewer and fails with `fatal: '$GIT_DIR' too big` at 216 or more,
+> and `repack`, `fetch` and `gc` work with pack files at 271-274 characters (so `core.longpaths` does
+> cover pack writes). The limit is git's own check in `setup.c`, `PATH_MAX - 40 < strlen(gitdir)`, with
+> Git for Windows' `PATH_MAX` of 260: a git directory of 220 characters or fewer works, 221 or more
+> fails, and for a checkout the git directory is the root plus `\.git` (5), so the root limit is 215.
+> It is a compile-time constant of the git build, so it cannot be configured. It was measured on git
+> 2.52.0.windows.1 only, and this spec does not claim other versions behave the same; the decision seam
+> (`CloneLayoutOptions.GitDirLimit`) is injectable for that reason. The model is now "in place iff the
+> longer of the final and staging roots is at most 215", and every number that followed from 259 and 85
+> has been re-derived (174 to 215, the AppHost depth 129 to 169, the git root budget 149 to 190).
+
 ## 1. Problem and what the code does today
 
 `LocalGitCheckout.CloneIntoPlace` clones into `<AppHost>\.servicesources\checkouts\.incoming-<8 hex>`
 (`ScratchDirectory`), then `Directory.Move`s it to `checkouts\<name>`. Before cloning,
-`PackPathLimit.EnsureFits` throws when `max(checkout, staging).Length + 85 > 259`, where 85 is
-`\.git\objects\pack\.tmp-<10 digit pid>-pack-<40 hex>.pack`. That refuses every AppHost directory over
-about 129 characters. The pack file lives under `<checkout>\.git`, so the only thing that has to be short
-is the git directory.
+`PackPathLimit.EnsureFits` (now `GitPathLimit`) threw when `max(checkout, staging).Length + 85 > 259`,
+where 85 was taken to be `\.git\objects\pack\.tmp-<10 digit pid>-pack-<40 hex>.pack`. That refused every
+AppHost directory over about 129 characters. The real constraint is git's check on the git directory
+path (220 characters), and only the git directory has to be short.
 
 The ticket proposes `git clone --separate-git-dir=<short>`. This spec settles the design questions the
 ticket lists and corrects three claims it makes about the code:
@@ -31,7 +45,7 @@ ticket lists and corrects three claims it makes about the code:
 - **Reconcile does not read `.git` by path.** `UseExistingCheckout` only calls `git` with `-C <checkout>`
   (`GetOriginUrl`, `HasUncommittedChanges`, `IsRefCheckedOut`, `Checkout`, `Fetch`), which follows a
   `.git` file. What assumes a directory is listed in section 5.
-- **Pack paths stay short, but the working tree does not stay unlimited.** See section 2.
+- **A short git directory is what matters, but the working tree does not stay unlimited.** See section 2.
 
 ## 2. What a separate git directory does and does not buy (measured)
 
@@ -41,8 +55,10 @@ ticket lists and corrects three claims it makes about the code:
 | 250, 253 | ok | ok; `repack`/`status` warn `unable to access '.gitattributes': Filename too long` |
 | 265, 295 | fails: `fatal: this operation must be run in a work tree`, `Clone succeeded, but checkout failed` | n/a |
 
-- The pack and repack temp file were never the problem once the git directory is short: `repack -a -d`
-  and `fetch` succeed at 250 characters where an in-place clone is refused at 175 (`259 - 85`).
+- Pack files were never the problem: with `core.longpaths=true`, `repack`, `fetch` and `gc` work with
+  pack paths of 271-274 characters in an in-place clone at about 208. What fails an in-place clone is
+  `'$GIT_DIR' too big` once the git directory passes 220 characters (checkout root 216 or more), and a
+  separate git directory sidesteps it: `repack -a -d` and `fetch` succeed at 250 characters.
 - The **working tree root** has its own ceiling, near 250 characters here: git changes into the
   directory, and a directory path past about 248 characters cannot be a current directory on Windows
   without the long-path opt-in. It is not "no matter how deep" as the ticket says. The ticket's note of
@@ -54,18 +70,22 @@ ticket lists and corrects three claims it makes about the code:
   with git 2.52; the implementation must re-check them in its Windows test, because they are git
   behaviour this package does not control.
 
-So the feature raises the longest usable staging root from 174 to 235 characters. That is an AppHost
-directory of about 190 characters for a checkout name of 18 characters or fewer (`235 - 27 - 19`, where 27 is
-`\.servicesources\checkouts` and 19 is `\.incoming-<8 hex>`); a longer checkout name makes the final path the
+So the feature raises the longest usable staging root from 215 to 235 characters. That is an AppHost
+directory of 189 characters for a checkout name of 18 characters or fewer (`235 - 27 - 19`, where 27 is
+`\.servicesources\checkouts` and 19 is `\.incoming-<8 hex>`), against 169 without it (`215 - 46`); a longer checkout name makes the final path the
 longer one and lowers it by the difference. A refusal remains beyond that (decision D1). The first
 warnings were seen at 250 and the first failure at 265, so 235 leaves about 15 characters of margin on purpose.
 
 ## 3. Decisions
 
-### D1. When: only when the in-place pack path would not fit
+### D1. When: only when the in-place git directory would be too long for git
 
-**Decision:** a clone is in place (today's layout, a `.git` directory) whenever `PackPathLimit` says the
-pack path fits. Only when it does not fit, on Windows, the clone uses `--separate-git-dir`.
+**Decision:** a clone is in place (today's layout, a `.git` directory) whenever
+`len(root) + len("\.git") <= 220`, that is a root of 215 or fewer, where `root` is the longer of the
+final checkout and its staging directory. Only when it is longer, on Windows, the clone uses
+`--separate-git-dir`. The 220 is `PATH_MAX (260) - 40` from git's `setup.c`, a compile-time constant of
+the git build (not configurable), measured on git 2.52.0.windows.1 only; the code names it
+(`GitPathLimit.MaxGitDirLength`) and carries a short comment saying where it comes from.
 
 **Why not always on Windows:**
 
@@ -80,19 +100,19 @@ pack path fits. Only when it does not fit, on Windows, the clone uses `--separat
 
 | Condition on Windows (`max(final, staging)` = `L`) | Result |
 |---|---|
-| `L + 85 <= 259` | in place, as today |
-| `259 - 85 < L <= 235` | separate git dir |
+| `L <= 215` | in place, as today |
+| `215 < L <= 235` | separate git dir |
 | `L > 235`, or the git root cannot be used (see D2) | refusal, reworded |
 
 The refusal stays a `ServiceSourcesConfigurationException`, still before anything is downloaded, still
-naming the length and how many characters to remove. Its content changes: it no longer cites the pack
+naming the length and how many characters to remove. Its content changes: it no longer cites a pack
 file, it cites the working-tree ceiling (`L > 235`), and the "move the AppHost" advice is the same. The
 235 is the largest staging root that was clean in section 2 with margin below the first warnings at 250.
-It is a constant (`MaxWorkingTreeRootLength`) with that measurement as its comment. `PackPathLimit` gains a
-second suffix, `LongestPackFileInGitDir` (`\objects\pack\.tmp-<10>-pack-<40>.pack`, 80 characters), built from the
-same pieces as `LongestPackFile` rather than hard-coding `\.git`; `PackPathLimitTests`, which assert 85 and
-174, are rewritten around the three-way decision, not merely extended. When the git root is
-unusable (D2) the message says so and gives today's pack-path numbers. Non-Windows behaviour is
+It is a constant (`MaxWorkingTreeRootLength`) with that measurement as its comment. `GitPathLimit` derives
+`MaxGitDirLength` (260 minus the 40 reserve), `MaxInPlaceRootLength` (that minus the `\.git` suffix) and the
+git-root budget from named values instead of the old pack-suffix lengths; the tests assert 215/216/235/236.
+`CloneLayoutOptions.GitDirLimit` lets a test vary the limit. When the git root is
+unusable (D2) the message says so and gives the `'$GIT_DIR' too big` numbers (220, and how far the root is over 215). Non-Windows behaviour is
 unchanged: no check, no separate git dir.
 
 ### D2. Location and naming
@@ -102,9 +122,8 @@ Not configurable: no environment variable, no config key, no public API. Tests i
 internal parameter. A setting would be a second place for a path-length mistake and a way to point the
 tool at a directory it then deletes from (section 4).
 
-**Budget:** a git directory is `<root>\<16 hex>-<8 hex>.git` (29 characters), and its deepest pack file is
-`\objects\pack\.tmp-<10>-pack-<40>.pack` (80 characters) below it, so the root must be at most 149
-characters. A longer root, or an empty `LocalApplicationData` (some service accounts), counts as "git
+**Budget:** a git directory is `<root>\<16 hex>-<8 hex>.git` (29 characters plus the separator), and git
+refuses a git directory path past 220, so the root must be at most 190 characters. A longer root, or an empty `LocalApplicationData` (some service accounts), counts as "git
 root cannot be used" in the D1 table.
 
 **Name:** `<hash>-<id>.git`.
@@ -193,10 +212,10 @@ below). Everything in D4 is decided.
 - A working in-place checkout is never touched. `PrepareRepoRoot` already returns an existing `.git`
   directory untouched, and D1 only decides for a new clone.
 - Decided (Open Question 2, resolved below): a deep checkout that already exists as an
-  in-place clone and now fails in `fetch`/`gc` is **not migrated automatically**. Moving a git directory under a developer's open IDE is a mutation of
+  in-place clone and so now fails every git command with `'$GIT_DIR' too big` is **not migrated automatically**. Moving a git directory under a developer's open IDE is a mutation of
   their working checkout, and `git init --separate-git-dir` on a repository whose own paths already
   exceed the limit is not something this package can promise to complete. Instead reconcile logs a notice
-  when it finds an in-place checkout whose pack path would not fit (`PackPathLimit` on its path),
+  when it finds an in-place checkout whose path is past 215 characters (`GitPathLimit.MaxInPlaceRoot`),
   saying to delete `checkouts\<name>` and re-run so it is cloned again with a separate git directory.
   `checkouts` is tool-owned (docs/sources/repository.md), so deleting it is the documented remedy for
   other states too.
@@ -267,15 +286,16 @@ All sites found by searching `.git` in `src/Aspire.Hosting.ServiceSources`:
 | `GitCliClient.GetHeadCommitSha` | accepts a `.git` directory or file | none: it is only reached after `PrepareRepoRoot` has run `Resolve` (`CheckoutPreparation` decides after reconcile). No git command runs in a `.git`-file checkout before `Resolve` accepts it; that is enforced in `PrepareRepoRoot`, not in the clients |
 | `UseExistingCheckout` / `Checkout` / `Fetch` / `GetOriginUrl` | `git -C <checkout>` | none; git follows the `.git` file |
 | `PathSource` / `WorktreeHome` | accept a `.git` file | none; they find the AppHost's repository, not a managed checkout |
-| `PackPathLimit` | the only check | split into "fits in place" and "ceiling", D1 |
+| `GitPathLimit` | the only check | split into "fits in place (215)" and "ceiling (235)", D1 |
 | `core.longpaths` backfill | does not exist | nothing to change |
 
 ## 6. Repack and gc
 
 `clone --dissociate` repacks into the staging git directory, and `gc --auto` repacks into the checkout's
-git directory. Both write under the git directory, which is now short, so both are covered. This is
-measured in section 2 (`repack -a -d`, `fetch`); the implementation repeats it with the real code path in
-a Windows test, with a checkout whose in-place pack path would not fit.
+git directory. Both write under the git directory, which is short, so both are covered; and `core.longpaths`
+covers pack writes anyway. This is measured in section 2 (`repack -a -d`, `fetch`); the implementation
+repeats it with the real code path in a Windows test, with a checkout whose in-place git directory would be
+too long, and pins plain-clone success at 215 and `'$GIT_DIR' too big` at 216.
 
 ## 7. Scope
 
