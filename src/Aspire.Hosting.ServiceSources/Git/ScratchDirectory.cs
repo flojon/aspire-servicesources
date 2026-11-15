@@ -175,9 +175,12 @@ internal sealed class ScratchDirectory : IDisposable
         }
     }
 
+    // The id is spliced into a search pattern, so anything but the generated shape must not reach it.
+    private static bool IsStagingId(string id) => id.Length == 8 && id.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'));
+
     private static void SweepPairedGitDirectory(string? gitRoot, string id)
     {
-        if (gitRoot is null || !Directory.Exists(gitRoot))
+        if (gitRoot is null || !Directory.Exists(gitRoot) || !IsStagingId(id))
         {
             return;
         }

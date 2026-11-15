@@ -435,7 +435,7 @@ internal static class LocalGitCheckout
                 && PackPathLimit.Required(repoRoot, repoRoot, out _) > PackPathLimit.MaxPathLength)
             {
                 notice?.Invoke(Raw.Compose(
-                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows to repack there, so a fetch or gc may fail with 'Filename too long'. It is not moved: delete '{Raw.Display(Path.Combine("checkouts", Path.GetFileName(repoRoot)))}' under the AppHost's '.servicesources' directory and re-run to have it cloned again with a short separate git directory."));
+                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows to repack there, so a fetch or gc may fail with 'Filename too long'. It is not moved. If it has no local changes, delete '{Raw.Display(Path.Combine("checkouts", Path.GetFileName(repoRoot)))}' under the AppHost's '.servicesources' directory and re-run to have it cloned again with a short separate git directory (otherwise move it aside first); this only works when the AppHost path is short enough for the working tree itself, about 190 characters or fewer."));
             }
 
             return;

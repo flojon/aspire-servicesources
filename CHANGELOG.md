@@ -65,7 +65,8 @@ never existed. Check the tag of the last release before adding one.
   the working tree where it was and a `.git` file pointing at the short git directory. Beyond that
   ceiling the clone is still refused, with a message about the working-tree path instead of the
   pack file. A working checkout is never moved, so a shallower AppHost clones as before; a git
-  directory nothing refers to any more is deleted after 14 days; an existing deep in-place checkout
+  directory nothing refers to any more is deleted by the next deep clone once it has gone 14 days
+  unused; an existing deep in-place checkout
   gets a notice to delete it and re-run. See
   [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
 

@@ -40,6 +40,7 @@ internal sealed class ServiceSourcesWarnings
     private readonly List<Entry> _entries = [];
 
     private bool _subscribed;
+    private IServiceProvider? _flushedServices;
 
     /// <summary>One thing worth telling the developer about.</summary>
     /// <remarks>
@@ -179,6 +180,7 @@ internal sealed class ServiceSourcesWarnings
 
         lock (_gate)
         {
+            _flushedServices = services;
             var pending = _entries.Where(entry => !entry.Reported).ToArray();
 
             foreach (var entry in pending)
@@ -216,9 +218,18 @@ internal sealed class ServiceSourcesWarnings
             // second one only this entry kind would use.
             var text = notice.ToString();
 
-            if (!_entries.OfType<Message>().Any(entry => string.Equals(entry.Text, text, StringComparison.Ordinal)))
+            if (_entries.OfType<Message>().Any(entry => string.Equals(entry.Text, text, StringComparison.Ordinal)))
             {
-                _entries.Add(new Message(text));
+                return;
+            }
+
+            // A deferred clone reconciles after BeforeStartEvent, when no later flush will come.
+            var services = _flushedServices;
+            _entries.Add(new Message(text) { Reported = services is not null });
+
+            if (services is not null)
+            {
+                Write(services, [text]);
             }
         }
     }

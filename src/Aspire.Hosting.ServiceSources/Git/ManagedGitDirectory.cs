@@ -68,9 +68,16 @@ internal static partial class ManagedGitDirectory
         {
             var record = JsonSerializer.Deserialize<OwnerRecord>(
                 PrepareMarker.ReadAllTextSharingRename(Path.Combine(gitDir, OwnerFileName)), SerializerOptions);
-            return string.IsNullOrWhiteSpace(record?.Checkout) ? null : record;
+            if (string.IsNullOrWhiteSpace(record?.Checkout))
+            {
+                return null;
+            }
+
+            // A record is untrusted, so a path that cannot be normalized later must not throw out of callers.
+            _ = Path.GetFullPath(record.Checkout);
+            return record;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
             return null;
         }

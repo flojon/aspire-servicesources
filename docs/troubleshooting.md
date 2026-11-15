@@ -44,9 +44,10 @@ directory under `%LOCALAPPDATA%\ServiceSources\git`. Plain `git` and your IDE wo
 as usual. A shallower AppHost is cloned exactly as before, with `.git` inside the checkout.
 
 - A git directory that no checkout refers to any more (the checkout was deleted, or its AppHost
-  moved) is removed automatically after 14 days without use. Each one is a full clone, so deleting a
-  checkout you will not need again and removing its folder under `%LOCALAPPDATA%\ServiceSources\git`
-  frees the space sooner. A checkout in use keeps its own git directory alive.
+  moved) is removed the next time a deep clone runs once it has gone 14 days without use. Each one is a
+  full clone, so once you have deleted a checkout you will not need again you can remove its folder
+  under `%LOCALAPPDATA%\ServiceSources\git` yourself (the `servicesources-owner.json` inside each
+  folder names its checkout); never remove the folder of a checkout that still exists. A checkout in use keeps its own git directory alive.
 - A checkout whose AppHost directory was moved or renamed is not picked up again: its `.git` file
   names the old location, and it is refused with a message that says so. Delete the checkout
   directory and re-run to clone it again.
@@ -54,9 +55,9 @@ as usual. A shallower AppHost is cloned exactly as before, with `.git` inside th
 ### `cannot clone into …: … at least N characters shorter`
 
 Even with the git directory elsewhere, git for Windows cannot work in a working tree whose own
-directory path is past about 235 characters (the clone is staged under `.incoming-<8 hex>`, 19
-characters longer than the final directory, and that is the path that counts). For a checkout name
-of up to 18 characters that is an AppHost directory of about 190 characters. Beyond it the error
+directory path is past about 235 characters (the clone is staged under `.incoming-<8 hex>`, a 19-character
+segment including the backslash, so for a checkout name of up to 18 characters the staging path is
+the one that counts). For such a name that is an AppHost directory of about 190 characters. Beyond it the error
 names the length and how many characters to remove; move the AppHost, or the worktree it is in, to a
 shorter path. If `%LOCALAPPDATA%` is unavailable or its `ServiceSources\git` folder would itself be
 too long, a deep AppHost is refused with the pack-file wording instead (the path would need N
@@ -66,7 +67,7 @@ characters, against 259).
 
 An existing checkout is never moved. If its git directory is still inside it and its path is too deep
 for git to repack there, a start logs a notice: a fetch or `gc` may fail with `Filename too long`.
-Delete `.servicesources\checkouts\<name>` and re-run, and it is cloned again with a short git
+If it has no local changes, delete `.servicesources\checkouts\<name>` (otherwise move it aside) and re-run, and it is cloned again with a short git
 directory.
 
 ## Getting the full exception detail
