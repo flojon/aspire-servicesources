@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
@@ -230,12 +232,8 @@ public class KubernetesSourceTests
         Assert.NotEqual(Timeout.InfiniteTimeSpan, registration.Timeout);
     }
 
-    [Fact]
-    public async Task Resolve_TheHealthCheck_ProbesTheLocalPortTheTunnelForwards()
+    private static async Task<HealthCheckResult> ProbeTheForwardedPort(int port)
     {
-        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         new KubernetesSource(new FakePortAllocator(port))
@@ -249,12 +247,29 @@ public class KubernetesSourceTests
         var check = registration.Factory(builder.Services.BuildServiceProvider());
         var context = new HealthCheckContext { Registration = registration };
 
-        // Listening: healthy. Not listening (kubectl has not opened the tunnel, or has exited): not.
-        Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(context)).Status);
+        return await check.CheckHealthAsync(context);
+    }
 
-        listener.Stop();
+    [Fact]
+    public async Task Resolve_TheHealthCheck_IsHealthyWhenTheTunnelIsListening()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        var down = await check.CheckHealthAsync(context);
+        Assert.Equal(HealthStatus.Healthy, (await ProbeTheForwardedPort(port)).Status);
+    }
+
+    [Fact]
+    public async Task Resolve_TheHealthCheck_IsUnhealthyWhenTheTunnelIsNotListening()
+    {
+        // Bound, never listening: a released port can be claimed by a parallel test, and the probe then succeeds.
+        using var held = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        held.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)held.LocalEndPoint!).Port;
+
+        var down = await ProbeTheForwardedPort(port);
+
         Assert.Equal(HealthStatus.Unhealthy, down.Status);
         Assert.Contains("'orders'", down.Description);
         Assert.Contains(port.ToString(), down.Description);
