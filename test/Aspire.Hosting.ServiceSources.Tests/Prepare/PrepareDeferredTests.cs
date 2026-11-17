@@ -1325,6 +1325,116 @@ public class PrepareDeferredTests
         return new Attempt(error, runner, builder, markerPath, before);
     }
 
+    private const string NonDeferrableKindName = "stand-in-nodefer";
+
+    /// <summary>A service in the group that shares the "routing" checkout the warm helper prepared.</summary>
+    private static ServiceDefinition GroupMember(string name, string kind, PrepareMetadata prepare) =>
+        new ServiceMetadata { RepositoryRef = "routing", Kind = kind }.ToDefinition(
+            "servicesources.yaml", name,
+            new Dictionary<string, RepositoryDefinition>
+            {
+                ["routing"] = new()
+                {
+                    Url = "https://example.com/routing.git", CheckoutName = "routing", Prepare = prepare,
+                },
+            });
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task BlockedMember_NeverWritesTheMarker_DeferredSiblingStillPrompts(bool blockedFirst)
+    {
+        var (dir, git, journal) = await WarmCheckoutAsync();
+        var markerPath = PrepareMarker.LocationFor(
+            "routing", LocalGitCheckout.ManagedRepoRoot(dir, "routing"), dir, managedCheckout: true)!;
+        var before = File.ReadAllText(markerPath);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        builder.AddLocalKind(NonDeferrableKindName, new StandInKind(journal, "prepare.sh", supportsDeferred: false));
+        var runner = new FakeRunner(journal);
+        var source = new LocalProjectSource(git, runner);
+
+        void AddBlocked() => Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            source.Resolve(builder, "worker", GroupMember("worker", NonDeferrableKindName, ChangedMetadata), DevConfig()));
+        void AddDeferred() =>
+            source.Resolve(builder, "api", GroupMember("api", KindName, ChangedMetadata), DevConfig());
+
+        if (blockedFirst)
+        {
+            AddBlocked();
+            AddDeferred();
+        }
+        else
+        {
+            AddDeferred();
+            AddBlocked();
+        }
+
+        Assert.Equal(before, File.ReadAllText(markerPath));
+        Assert.Equal(0, runner.Runs);
+        Assert.Single(DeferredCheckout.For(builder).Snapshot());
+    }
+
+    [Fact]
+    public async Task GatedSibling_PullsLaterDefaultTimingSiblingWhoseOwnStepLooksUnchanged_IntoDeferral()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        var deferred = DeferredCheckout.For(builder);
+        var definition = GroupMember("api", KindName, ChangedMetadata);
+
+        Assert.True(deferred.ShouldDefer(builder, "api", definition, DevConfig(), StepFor(ChangedMetadata), git));
+        Assert.True(deferred.ShouldDefer(builder, "worker", definition, DevConfig(), StepFor(Prepare()), git));
+    }
+
+    [Fact]
+    public async Task UngatedCheckout_DoesNotPullUnchangedSibling()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        var deferred = DeferredCheckout.For(builder);
+        var definition = GroupMember("api", KindName, Prepare());
+
+        Assert.False(deferred.ShouldDefer(builder, "api", definition, DevConfig(), StepFor(Prepare()), git));
+        Assert.False(deferred.ShouldDefer(builder, "worker", definition, DevConfig(), StepFor(Prepare()), git));
+    }
+
+    [Fact]
+    public async Task ExplicitEagerSibling_IsNotPulledIn_ItIsBlockedInstead()
+    {
+        var attempt = await ResolveWarmAsync(CheckoutTiming.Eager, ChangedMetadata);
+
+        Assert.NotNull(attempt.Error);
+        Assert.Empty(DeferredCheckout.For(attempt.Builder).Snapshot());
+    }
+
+    [Fact]
+    public async Task GatedCheckouts_NotSharedAcrossBuilders()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var first = TestHelpers.CreateBuilderThatCanStart(dir);
+        var second = TestHelpers.CreateBuilderThatCanStart(dir);
+        var definition = GroupMember("api", KindName, ChangedMetadata);
+
+        Assert.True(DeferredCheckout.For(first)
+            .ShouldDefer(first, "api", definition, DevConfig(), StepFor(ChangedMetadata), git));
+        Assert.False(DeferredCheckout.For(second)
+            .ShouldDefer(second, "worker", definition, DevConfig(), StepFor(Prepare()), git));
+    }
+
+    [Fact]
+    public async Task GatedCheckoutName_WithoutPrepareStep_DoesNotDefer()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        var deferred = DeferredCheckout.For(builder);
+        var definition = GroupMember("api", KindName, ChangedMetadata);
+
+        Assert.True(deferred.ShouldDefer(builder, "api", definition, DevConfig(), StepFor(ChangedMetadata), git));
+        Assert.False(deferred.ShouldDefer(builder, "worker", definition, DevConfig()));
+    }
+
     [Fact]
     public async Task ExplicitEager_WarmChangedCommand_AddServiceThrowsNamingServiceAndTheWayOut()
     {

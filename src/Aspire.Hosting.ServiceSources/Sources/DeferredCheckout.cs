@@ -113,6 +113,8 @@ internal sealed class DeferredCheckout
     /// </summary>
     private bool _enabled = true;
 
+    private readonly HashSet<string> _gatedCheckouts = new(StringComparer.Ordinal);
+
     /// <summary>
     /// Whether the AppHost asked for <see cref="CheckoutTiming.Eager"/> and nothing later undid it.
     /// </summary>
@@ -356,7 +358,28 @@ internal sealed class DeferredCheckout
 
         // The one warm case that is deferred: the marker lives in the checkout, so only a checkout
         // that exists can show its command changed, and the prompt needs the dashboard.
-        return NeedsChangedCommandGate(builder, serviceName, definition, config, prepareStep, gitClient);
+        if (NeedsChangedCommandGate(builder, serviceName, definition, config, prepareStep, gitClient))
+        {
+            lock (_gate)
+            {
+                _gatedCheckouts.Add(definition.Repository.CheckoutName);
+            }
+
+            return true;
+        }
+
+        // A sibling whose own step looks unchanged still waits with the gated one, so the group
+        // is asked together instead of one member composing against a checkout another bootstraps.
+        // Requires a step: the prefetch asks without one and must not see a different answer.
+        if (prepareStep is not null && LocalGitCheckout.IsManagedCheckout(config))
+        {
+            lock (_gate)
+            {
+                return _gatedCheckouts.Contains(definition.Repository.CheckoutName);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
