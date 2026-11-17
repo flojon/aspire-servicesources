@@ -394,10 +394,12 @@ internal sealed class PathSource(
 
         var directory = PrepareMarker.NormalizeCheckoutPath(repoRoot);
 
+        var prepared = PreparedDirectories.For(builder);
+
         using (CheckoutNameLock.For(builder).Acquire(directory))
         {
             // Settled under the lock by an earlier service: its marker, not this one's, records it.
-            if (PreparedDirectories.For(builder).IsSettled(directory, step))
+            if (prepared.IsSettled(directory, step))
             {
                 return;
             }
@@ -406,7 +408,11 @@ internal sealed class PathSource(
                 builder, serviceName, PreparePlan.ServiceLabel(serviceName), serviceName, step, repoRoot,
                 managedCheckout: false, _gitClient, _prepareRunner);
 
-            PreparedDirectories.For(builder).MarkSettled(directory, step);
+            // Only a run mode start settles anything; elsewhere each service still reports its own skip.
+            if (builder.ExecutionContext.IsRunMode)
+            {
+                prepared.MarkSettled(directory, step);
+            }
         }
     }
 }

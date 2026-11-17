@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
 namespace Aspire.Hosting.ServiceSources.Prepare;
@@ -16,26 +17,19 @@ internal sealed class PreparedDirectories
 {
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, PreparedDirectories> Cache = new();
 
-    private readonly HashSet<(string Directory, string CommandHash, PrepareMode Mode)> _settled = [];
-
-    private readonly Lock _gate = new();
+    private readonly ConcurrentDictionary<(string Directory, string CommandHash, PrepareMode Mode), byte> _settled = new();
 
     public static PreparedDirectories For(IDistributedApplicationBuilder builder) =>
         Cache.GetValue(builder, static _ => new PreparedDirectories());
 
-    public bool IsSettled(string directory, PrepareStep step)
-    {
-        lock (_gate)
-        {
-            return _settled.Contains((directory, step.CommandHash, step.Mode));
-        }
-    }
+    /// <remarks>
+    /// Check-then-mark is atomic only per directory: callers hold <see cref="Sources.CheckoutNameLock"/>
+    /// for <paramref name="directory"/> across <see cref="IsSettled"/> and <see cref="MarkSettled"/>.
+    /// Different directories hold different locks, hence the concurrent set.
+    /// </remarks>
+    public bool IsSettled(string directory, PrepareStep step) =>
+        _settled.ContainsKey((directory, step.CommandHash, step.Mode));
 
-    public void MarkSettled(string directory, PrepareStep step)
-    {
-        lock (_gate)
-        {
-            _settled.Add((directory, step.CommandHash, step.Mode));
-        }
-    }
+    public void MarkSettled(string directory, PrepareStep step) =>
+        _settled[(directory, step.CommandHash, step.Mode)] = 0;
 }

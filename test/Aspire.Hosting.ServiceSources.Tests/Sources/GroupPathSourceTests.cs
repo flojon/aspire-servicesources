@@ -685,10 +685,12 @@ public class GroupPathSourceTests
     // === prepare: identical steps on one resolved directory run once ===
 
     private static DirectoryRecordingRunner ResolveTwoRedirectedMembers(
-        PrepareDeveloperConfig? ordersPrepare, PrepareDeveloperConfig? basketPrepare, out string groupDir)
+        PrepareDeveloperConfig? ordersPrepare, PrepareDeveloperConfig? basketPrepare, out string groupDir,
+        string? sharedDirectory = null, bool publish = false)
     {
-        groupDir = ProjectTree("Orders", "Basket");
-        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        groupDir = sharedDirectory ?? ProjectTree("Orders", "Basket");
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var builder = publish ? TestHelpers.CreatePublishingBuilder(appHostDirectory) : TestHelpers.CreateBuilder(appHostDirectory);
         var runner = new DirectoryRecordingRunner();
         var group = PathGroup();
         group.Path!.Path = groupDir;
@@ -753,10 +755,32 @@ public class GroupPathSourceTests
     {
         var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "always" };
 
-        var first = ResolveTwoRedirectedMembers(prepare, prepare, out _);
-        var second = ResolveTwoRedirectedMembers(prepare, prepare, out _);
+        var first = ResolveTwoRedirectedMembers(prepare, prepare, out var shared);
+        var second = ResolveTwoRedirectedMembers(prepare, prepare, out _, shared);
 
         Assert.Single(first.Runs);
         Assert.Single(second.Runs);
+    }
+
+    [Fact]
+    public void RedirectedMembers_OutsideRunMode_EachReportsItsOwnSkippedStep()
+    {
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev-publish-notice"] };
+        var captured = new StringWriter();
+        var original = Console.Out;
+        Console.SetOut(captured);
+
+        DirectoryRecordingRunner runner;
+        try
+        {
+            runner = ResolveTwoRedirectedMembers(prepare, prepare, out _, publish: true);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        Assert.Empty(runner.Runs);
+        Assert.Equal(2, captured.ToString().Split("Not running the prepare step 'make dev-publish-notice'").Length - 1);
     }
 }
