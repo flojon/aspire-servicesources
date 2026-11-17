@@ -1,7 +1,7 @@
 # Gating a changed `prepare` command on the eager path and across a checkout group (#433)
 
 **Date:** 2026-11-17
-**Status:** Draft (open questions in section 9 need a human answer before the plan)
+**Status:** Approved (section 9 resolved by the human on 2026-11-17)
 **Resolves:** #433, the follow-up to #298 / PR #431 (the consent prompt for a changed `prepare` command
 only guards services that resolve on the deferred path).
 **Out of scope:** #271 (cold-checkout source pick), #128 (interactive configuration).
@@ -193,21 +193,13 @@ One behaviour change in two components, docs and CHANGELOG. Not included: a pers
 setting, prompting on the eager path, content-hashing the invoked scripts, and any change to the 5-minute timeout or
 to holding the checkout lock during the prompt.
 
-## 9. Open Questions
+## 9. Open Questions (resolved 2026-11-17)
 
-**Q1. A non-deferrable member can never be approved from the dashboard.** In a group where one member's kind
-cannot defer (some `javascript` app types, a custom kind), a changed command fails that member's `AddService` on
-every start until the developer clears the marker, in CI as well as locally. Accept that, or exempt the case
-where no dashboard can exist (an environment check such as the one `UseInteractiveServiceConfiguration` uses) and run
-unprompted like the deferred path does? Recommended: accept; it is the narrowest fail-closed reading of the decision.
+None open. The human answered all three:
 
-**Q2. Is "delete the marker or the checkout" an acceptable documented hatch**, or does the human want an explicit
-approval mechanism (a developer-config field or environment variable)? That would add configuration surface and
-probably a `PublicAPI` or schema change, and widens what a catalog author's repo can influence. Recommended: documented
-marker clearing, no new mechanism.
-
-**Q3. Gap 2 is mostly closed by D1 already.** Per-member `ShouldDefer` reads the shared marker, which stays unwritten
-until a deferred task runs, so default-timing siblings already defer together; the bypass was the eager member recording
-the hash, which D1 removes. D4's `_gatedCheckouts` is therefore order-independence hardening for siblings whose own
-step differs, not a new bypass fix. Build it as specified, or drop it and rely on D1 plus test 6? Recommended: build it,
-it is small; drop it if review finds it adds a second source of truth for "deferred".
+- **Q1: accepted.** A non-deferrable member with a changed command fails `AddService` on every start, in CI as
+  well as locally, until the marker or checkout is cleared. No environment-based exemption.
+- **Q2: documented marker/checkout deletion is the escape hatch.** No approval setting, developer-config field,
+  environment variable, schema or `PublicAPI` change.
+- **Q3: build `_gatedCheckouts`** as specified in D4, as order-independence hardening for siblings whose own
+  step differs (not a new bypass fix).
