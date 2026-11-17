@@ -39,7 +39,7 @@ public static class ServiceConfigurationExtensions
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The resolved resource is not a <typeparamref name="T"/>, or <typeparamref name="T"/> cannot
     /// reach the service behind an out-of-band source (<c>"url"</c>, <c>"kubernetes"</c>,
-    /// <c>"disabled"</c>, or the placeholder for a service nobody chose a source for) — see <see cref="IsUnreachable{T}"/> for the one capability that still can.
+    /// <c>"disabled"</c>, or the placeholder for a service nobody chose a source for) — see <see cref="IsUnreachable{T}"/> for the capability that still can.
     /// </exception>
     [AspireExportIgnore(Reason =
         "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
@@ -185,6 +185,10 @@ public static class ServiceConfigurationExtensions
     /// start ordering is not — holding the port-forward back until a migration finishes is exactly
     /// what the AppHost asked for, and Aspire honours it.
     /// <para>
+    /// This keeps only <see cref="IResourceWithWaitSupport"/>: a health check has no capability
+    /// interface, so <see cref="Reachability"/> alone decides it.
+    /// </para>
+    /// <para>
     /// Nothing is reachable for <c>"url"</c> or <c>"disabled"</c>: neither's resource is ever
     /// registered (see <see cref="Sources.UrlSource"/> and <see cref="Sources.DisabledSource"/>), so
     /// there is no process to order and no configuration to apply.
@@ -196,7 +200,7 @@ public static class ServiceConfigurationExtensions
     /// than redeclared.
     /// </para>
     /// </remarks>
-    private static bool IsUnreachable<T>(string source)
+    internal static bool IsUnreachable<T>(string source)
         where T : IResource =>
         Reachability.OutOfBandSources.Contains(source)
         && !(string.Equals(source, "kubernetes", StringComparison.Ordinal) && typeof(T) == typeof(IResourceWithWaitSupport));
