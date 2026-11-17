@@ -220,16 +220,21 @@ port-forward` in front of something already running elsewhere, and a `"disabled"
 running at all, deliberately — so environment variables applied here would configure `kubectl`
 rather than the service, or configure nothing anyone will ever see. A `"url"`/`"kubernetes"`
 service is expected to be configured wherever it actually runs; a `"disabled"` one is expected to
-be switched back on first. This includes `WithHttpHealthCheck` — a `"kubernetes"` service's
-port-forward has a real local endpoint, but the call still dual-writes onto the `kubectl` process
-rather than the service behind it, so it's skipped the same as any other configuration call rather
-than treated as an exception alongside wait ordering.
+be switched back on first.
 
-The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
-`WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward` executable, and
-holding *that* back until a migration finishes is exactly what the AppHost asked for. Only
-configuration that would land on the wrong process is dropped. A `"url"` or `"disabled"` service
-skips wait ordering too, since neither has a registered resource for Aspire to hold back.
+There are two exceptions, both on a `"kubernetes"` service, and both still apply:
+
+- **Wait ordering.** `WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward`
+  executable, and holding *that* back until a migration finishes is exactly what the AppHost asked for.
+- **Health checks** (`WithHttpHealthCheck`, `WithHealthCheck`). The port-forward's resource is the
+  tunnel, so the check probes the service behind it, and `WaitFor(service)` then waits for it too.
+
+Only configuration that would land on the wrong process is dropped. A `"url"`, `"disabled"` or
+unconfigured service skips both exceptions, since none has a registered resource for Aspire to hold
+back or probe. A subclass of the health-check annotation, and every other annotation, is still skipped,
+including other Aspire extension methods that add annotations. Only the native `WithHttpHealthCheck` and
+`WithHealthCheck` calls apply: `Unwrap<IResourceWithEndpoints>(r => r.WithHttpHealthCheck())` is still
+skipped on a `"kubernetes"` service.
 
 That is this service waiting for something else. The other direction — something else waiting for
 *this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and `"disabled"` and honoured
@@ -270,8 +275,8 @@ a value; use the delegate form for anything that should survive a source switch.
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
 native vocabulary — `withEnvironment`, `withReference`, `withArgs`, `withEndpoint`,
-`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`, `withCommand`, `waitFor`,
-`waitForCompletion`, whether
+`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`,
+`withCommand`, `waitFor`, `waitForCompletion`, whether
 Aspire's own or shadowed in this package — projects onto the generated `addService(...)` handle
 exactly as it does in C#:
 
@@ -283,8 +288,7 @@ const payments = await builder
 ```
 
 Out-of-band sources (`"url"`, `"kubernetes"`, `"disabled"`) are skipped and logged exactly as on the C# side,
-including the wait-ordering exception for `waitFor`/`waitForCompletion` against a `"kubernetes"`
-service. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
+including the wait-ordering exception for `waitFor`/`waitForCompletion`. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
 Type System erases a generic method's type parameter to its constraint, which here is exactly the
 resource type being requested — so reaching a non-`dotnet` kind's own vocabulary from a guest
 language needs a native Aspire integration for that kind, the same as it would without this

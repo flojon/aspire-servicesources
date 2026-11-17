@@ -135,7 +135,13 @@ public class PortForwardSupervisorTests
 
         public ManualTimeProvider Time { get; } = new();
 
-        public void Publish(string? state, int? exitCode = null, HealthStatus? health = null)
+        public void Publish(
+            string? state,
+            int? exitCode = null,
+            HealthStatus? health = null,
+            HealthStatus? userCheck = null,
+            bool tunnelReport = true,
+            bool tunnelStatusKnown = true)
         {
             var snapshot = new CustomResourceSnapshot
             {
@@ -145,9 +151,22 @@ public class PortForwardSupervisorTests
                 ExitCode = exitCode,
             };
 
-            if (health is { } status)
+            var reports = new List<HealthReportSnapshot>();
+
+            if (tunnelReport && (health is not null || !tunnelStatusKnown))
             {
-                snapshot = snapshot.WithHealthReports([new HealthReportSnapshot("tcp", status, null, null)]);
+                reports.Add(new HealthReportSnapshot(
+                    KubernetesSource.HealthCheckKey("orders"), tunnelStatusKnown ? health : null, null, null));
+            }
+
+            if (userCheck is { } user)
+            {
+                reports.Add(new HealthReportSnapshot("user", user, null, null));
+            }
+
+            if (reports.Count > 0)
+            {
+                snapshot = snapshot.WithHealthReports([.. reports]);
             }
 
             Interlocked.Increment(ref _published);
@@ -299,6 +318,119 @@ public class PortForwardSupervisorTests
         await harness.Control.NextStartAsync();
 
         harness.BringUp();
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.StableUptime);
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        var (_, text) = await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+        await harness.FinishAsync();
+
+        Assert.Contains("in 1s (attempt 1 of 8)", text);
+    }
+
+    [Fact]
+    public async Task ATunnelThatIsHealthy_WithAFailingUserCheck_CountsAsReady()
+    {
+        var harness = new Harness();
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Healthy, userCheck: HealthStatus.Unhealthy);
+        await harness.IdleAsync();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+
+        await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+        await harness.FinishAsync();
+
+        Assert.Equal(1, harness.Control.Starts);
+        Assert.Empty(harness.Control.Failed);
+    }
+
+    [Fact]
+    public async Task AFailingUserCheck_DoesNotRaiseTheNoReadyPodsWarning()
+    {
+        var harness = new Harness();
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Healthy, userCheck: HealthStatus.Unhealthy);
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.UnhealthyWarnAfter + TimeSpan.FromSeconds(1));
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Healthy, userCheck: HealthStatus.Unhealthy);
+        await harness.FinishAsync();
+
+        Assert.Empty(harness.Logger.Written);
+    }
+
+    [Fact]
+    public async Task AnUnhealthyTunnel_StillRaisesTheWarning_EvenWhenAUserCheckIsHealthy()
+    {
+        var harness = new Harness();
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Unhealthy, userCheck: HealthStatus.Healthy);
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.UnhealthyWarnAfter);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Unhealthy, userCheck: HealthStatus.Healthy);
+
+        var (level, text) = await harness.Logger.NextAsync();
+        await harness.FinishAsync();
+
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Contains("has not accepted a connection", text);
+    }
+
+    [Fact]
+    public async Task AUserCheckAloneReporting_IsNeitherReadyNorUnhealthy()
+    {
+        var harness = new Harness();
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, userCheck: HealthStatus.Unhealthy, tunnelReport: false);
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.UnhealthyWarnAfter + TimeSpan.FromSeconds(1));
+        harness.Publish(KnownResourceStates.Running, userCheck: HealthStatus.Unhealthy, tunnelReport: false);
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+        await harness.FinishAsync();
+
+        Assert.DoesNotContain(harness.Logger.Written, l => l.Text.Contains("has not accepted a connection"));
+        Assert.Single(harness.Control.Failed);
+        Assert.Equal(0, harness.Control.Starts);
+    }
+
+    [Fact]
+    public async Task ATunnelReportWithNoStatusYet_ChangesNothing()
+    {
+        var harness = new Harness();
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, tunnelStatusKnown: false);
+        await harness.IdleAsync();
+        harness.Time.Advance(PortForwardSupervisor.UnhealthyWarnAfter + TimeSpan.FromSeconds(1));
+        harness.Publish(KnownResourceStates.Running, tunnelStatusKnown: false);
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+        await harness.FinishAsync();
+
+        Assert.DoesNotContain(harness.Logger.Written, l => l.Text.Contains("has not accepted a connection"));
+        Assert.Single(harness.Control.Failed);
+        Assert.Equal(0, harness.Control.Starts);
+    }
+
+    [Fact]
+    public async Task StableUptime_FollowsTheTunnelReportOnly()
+    {
+        var harness = new Harness();
+        harness.BringUp();
+        harness.Publish(KnownResourceStates.Finished, exitCode: 1);
+        await harness.Logger.NextAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await harness.Control.NextStartAsync();
+
+        harness.Publish(KnownResourceStates.Starting);
+        harness.Publish(KnownResourceStates.Running);
+        harness.Publish(KnownResourceStates.Running, health: HealthStatus.Healthy, userCheck: HealthStatus.Unhealthy);
         await harness.IdleAsync();
         harness.Time.Advance(PortForwardSupervisor.StableUptime);
         harness.Publish(KnownResourceStates.Finished, exitCode: 1);

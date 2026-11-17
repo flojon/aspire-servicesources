@@ -71,6 +71,10 @@ never existed. Check the tag of the last release before adding one.
   gets a notice to delete it and re-run. See
   [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
 
+- **A health check on a `"kubernetes"` service now applies instead of being skipped** ([#399]).
+  `WithHttpHealthCheck` and `WithHealthCheck` reach the port-forward's resource, so `WaitFor(service)`
+  also waits for the author's check. `"url"`, `"disabled"` and unconfigured
+  services still skip the call. Remove a `WithHttpHealthCheck` that was only there to be skipped.
 - **The error for `source: repository` on a service whose catalog entry has no repository now offers
   a switch to `url`, `container` or `kubernetes` again, but only where that source would actually
   resolve the entry** ([#378]). Each source answers for itself, through the same validation its own
@@ -2199,6 +2203,7 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
+[#399]: https://github.com/flojon/aspire-servicesources/issues/399
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
 [#481]: https://github.com/flojon/aspire-servicesources/issues/481
 [#490]: https://github.com/flojon/aspire-servicesources/issues/490

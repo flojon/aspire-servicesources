@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -37,13 +38,14 @@ internal static class Reachability
     /// adds and treated everything else as reachable by default. That missed every other Aspire
     /// extension method already bound to <see cref="IResourceWithEndpoints"/>/
     /// <see cref="IResourceWithArgs"/> (<c>AsHttp2Service</c>, <c>WithMcpServer</c>,
-    /// <c>WithHttpHealthCheck</c>, <c>WithEndpointProxySupport</c>, <c>WithLaunchToolArgs</c>, and any
+    /// <c>WithEndpointProxySupport</c>, <c>WithLaunchToolArgs</c>, and any
     /// future one) — those add capability annotations too, just ones this table never named, so they
     /// dual-write onto a <c>"kubernetes"</c> service's real <c>kubectl port-forward</c> process (the
     /// exact wrong-process failure mode <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s own
     /// remarks describe) or vanish onto a <c>"url"</c> facade with no real resource and no warning.
     /// Failing closed on anything unrecognized is what <c>Configure&lt;T&gt;</c>'s skip-with-warning
-    /// existed to guarantee in the first place.
+    /// existed to guarantee in the first place. The few types that do reach a service live in
+    /// <see cref="ReachableBySource"/>, never here.
     /// </remarks>
     private static readonly HashSet<Type> DecorationAnnotationTypes =
     [
@@ -51,13 +53,24 @@ internal static class Reachability
         typeof(EndpointReferenceAnnotation),
     ];
 
+    // A type joins only if all hold: (a) it is data the real resource or Aspire consumes, not applied
+    // to the kubectl process; (b) acting on the real resource measures or orders the service behind
+    // the tunnel; (c) no invariant elsewhere assumes it unreachable. Keyed by source so an entry
+    // cannot leak to another source.
+    private static readonly FrozenDictionary<string, FrozenSet<Type>> ReachableBySource =
+        new Dictionary<string, FrozenSet<Type>>(StringComparer.Ordinal)
+        {
+            ["kubernetes"] = new[] { typeof(WaitAnnotation), typeof(HealthCheckAnnotation) }.ToFrozenSet(),
+        }.ToFrozenDictionary(StringComparer.Ordinal);
+
     /// <summary>
     /// Whether an annotation of <paramref name="annotationType"/> cannot reach the service behind
     /// <paramref name="source"/> — an exact re-expression of
     /// <c>ServiceConfigurationExtensions.IsUnreachable&lt;T&gt;</c> (design §5): every capability
-    /// annotation is unreachable for <c>"url"</c>; only <see cref="WaitAnnotation"/> survives for
-    /// <c>"kubernetes"</c>, whose real resource is a genuine <c>kubectl port-forward</c> process
-    /// worth ordering against. Only <see cref="DecorationAnnotationTypes"/> is always
+    /// annotation is unreachable for <c>"url"</c>; only <see cref="WaitAnnotation"/> and
+    /// <see cref="HealthCheckAnnotation"/> survive for <c>"kubernetes"</c>, whose real resource is a
+    /// genuine <c>kubectl port-forward</c> process worth ordering against and, through the tunnel,
+    /// worth probing. Only <see cref="DecorationAnnotationTypes"/> is always
     /// reachable — everything else gates, on the assumption that an annotation type this table does
     /// not recognize is configuration, not bookkeeping. Keyed by <see cref="Type"/> identity, not
     /// <c>Type.Name</c>: both entries are public, so there is no accessibility reason (unlike
@@ -67,7 +80,7 @@ internal static class Reachability
     public static bool IsUnreachable(Type annotationType, string source) =>
         OutOfBandSources.Contains(source)
         && !DecorationAnnotationTypes.Contains(annotationType)
-        && !(string.Equals(source, "kubernetes", StringComparison.Ordinal) && annotationType == typeof(WaitAnnotation));
+        && !(ReachableBySource.TryGetValue(source, out var types) && types.Contains(annotationType));
 
     /// <summary>
     /// The capability name a skip warning should show for <paramref name="annotationType"/> — the
@@ -87,14 +100,28 @@ internal static class Reachability
     /// all resolve to a lookup against this same annotation type, so a skip triggered by any of them
     /// is the identical capability, reported once under one label rather than three.
     /// </remarks>
-    public static string CapabilityLabel(Type annotationType) => annotationType.Name switch
+    public static string CapabilityLabel(Type annotationType)
     {
-        "EnvironmentAnnotation" or nameof(EnvironmentCallbackAnnotation) => "WithEnvironment",
-        nameof(CommandLineArgsCallbackAnnotation) => "WithArgs",
-        nameof(EndpointAnnotation) => "WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint",
-        nameof(WaitAnnotation) => "WaitFor/WaitForCompletion",
-        _ => annotationType.Name,
-    };
+        // Walk bases so a subclass reports its capability's method, not its own type name.
+        for (var type = annotationType; type is not null; type = type.BaseType)
+        {
+            var label = type.Name switch
+            {
+                "EnvironmentAnnotation" or nameof(EnvironmentCallbackAnnotation) => "WithEnvironment",
+                nameof(CommandLineArgsCallbackAnnotation) => "WithArgs",
+                nameof(EndpointAnnotation) => "WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint",
+                nameof(WaitAnnotation) => "WaitFor/WaitForCompletion",
+                nameof(HealthCheckAnnotation) => "WithHealthCheck/WithHttpHealthCheck",
+                _ => null,
+            };
+            if (label is not null)
+            {
+                return label;
+            }
+        }
+
+        return annotationType.Name;
+    }
 }
 
 /// <summary>
@@ -143,11 +170,27 @@ internal sealed class ServiceResourceBuilder(
         // `real is not null` (as an earlier draft of this design did) would silently apply every
         // annotation to the facade alone for "url", with no warning at all — the opposite of
         // Configure<T>'s preserved skip-with-warning behaviour.
-        if (Reachability.IsUnreachable(typeof(TAnnotation), source))
+        ArgumentNullException.ThrowIfNull(annotation);
+
+        // The runtime type too: a subclass passed under a reachable base type argument must not slip
+        // through. Derived decoration types fail closed the same way, with a warning.
+        var runtimeType = annotation.GetType();
+        var gatedType = Reachability.IsUnreachable(typeof(TAnnotation), source) ? typeof(TAnnotation)
+            : Reachability.IsUnreachable(runtimeType, source) ? runtimeType
+            : null;
+        if (gatedType is not null)
         {
             ServiceSourcesWarnings.For(ApplicationBuilder)
-                .AddSkip(Resource.Name, source, Reachability.CapabilityLabel(typeof(TAnnotation)));
+                .AddSkip(Resource.Name, source, Reachability.CapabilityLabel(gatedType));
             return this;
+        }
+
+        // A resource carries many health checks, so Replace would drop the tunnel's own (or throw
+        // on two); the supervisor needs the tunnel's report to release WaitFor. Exact type: the gate
+        // above already skipped subclasses.
+        if (runtimeType == typeof(HealthCheckAnnotation) && string.Equals(source, "kubernetes", StringComparison.Ordinal))
+        {
+            behavior = ResourceAnnotationMutationBehavior.Append;
         }
 
         // Mirrors Aspire's own DistributedApplicationResourceBuilder<T>.WithAnnotation exactly:
