@@ -6,7 +6,7 @@
 only guards services that resolve on the deferred path).
 **Out of scope:** #271 (cold-checkout source pick), #128 (interactive configuration).
 **Measured against:** reading the repo at `origin/main` `eedf46be`. Nothing here was run; the plan's tests
-re-check each claim marked **[verify]**.
+re-check the claims made here.
 
 ## 1. Problem and what the code does today
 
@@ -118,8 +118,7 @@ An approval needs no memory: the approved run writes the marker, and siblings th
 - `Sources/LocalProjectSource.cs`, `Resolve`, right after the deferred branch falls through and before
   `prefetch.GetRepoRoot`: if run mode, the catalog step exists and `NeedsChangedCommandGate` is true, throw the D1
   error. Before `GetRepoRoot` so a blocked service does not fetch or check out a new ref first, and the evaluation is
-  the same one `ShouldDefer` already made at the same point. **[verify]** that `Decide` does not throw for a cold
-  or debris directory here; mirror `ShouldDefer`'s order (cold first) so a cold checkout never reaches it.
+  the same one `ShouldDefer` already made at the same point. The shared predicate checks cold first, as `ShouldDefer` does, and a debris directory reaches `Decide`, which finds no marker and reports not changed.
   `WouldBeDeferredIfAdded` in `LocalCheckoutPrefetch.cs` already calls `ShouldDefer` without a step, so the prefetch is unaffected.
 - Not touched: `CheckoutPreparation` decision logic, `PrepareMarker`, `PathSource` (a `path` or `repository.path`
   service runs the developer's own command in the developer's own directory, never the catalog's; publish mode never
