@@ -115,6 +115,24 @@ internal sealed class DeferredCheckout
 
     private readonly HashSet<string> _gatedCheckouts = new(StringComparer.Ordinal);
 
+    private readonly HashSet<(string CheckoutName, string CommandHash)> _declined = [];
+
+    internal bool WasDeclined(string checkoutName, string commandHash)
+    {
+        lock (_gate)
+        {
+            return _declined.Contains((checkoutName, commandHash));
+        }
+    }
+
+    private void MarkDeclined(string checkoutName, string commandHash)
+    {
+        lock (_gate)
+        {
+            _declined.Add((checkoutName, commandHash));
+        }
+    }
+
     /// <summary>
     /// Whether the AppHost asked for <see cref="CheckoutTiming.Eager"/> and nothing later undid it.
     /// </summary>
@@ -1386,7 +1404,7 @@ internal sealed class DeferredCheckout
     /// checkout that fails now costs one service, not the whole AppHost. The developer's route to
     /// it is the dashboard, so that is where it is put.
     /// </remarks>
-    private static async Task StartDeferredAsync(
+    private async Task StartDeferredAsync(
         Deferred deferred, IServiceProvider services, CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken)
     {
         // Declared out here so the failure report can tell what this failure is not about.
@@ -1608,7 +1626,7 @@ internal sealed class DeferredCheckout
     /// the developer already ran or accepted by cloning. Without a dashboard nothing can ask, so the
     /// step runs unprompted as it always has.
     /// </remarks>
-    private static async Task<bool> ConfirmChangedCommandAsync(
+    private async Task<bool> ConfirmChangedCommandAsync(
         Deferred deferred, PrepareStep step, Raw label, string repoRoot, IServiceProvider services,
         ResourceNotificationService notifications, ILogger logger, CancellationToken stoppingToken)
     {
@@ -1621,6 +1639,18 @@ internal sealed class DeferredCheckout
                 deferred.GitClient))
         {
             return true;
+        }
+
+        var checkoutName = deferred.Definition.Repository.CheckoutName;
+
+        // Siblings share the checkout and its marker, so one answer covers them all.
+        if (WasDeclined(checkoutName, step.CommandHash))
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"Skipped: this prepare command was already declined for the shared checkout, so it is not asked again this run.");
+
+            return false;
         }
 
         var interaction = services.GetService<IInteractionService>();
@@ -1681,6 +1711,8 @@ internal sealed class DeferredCheckout
         }
 
         stoppingToken.ThrowIfCancellationRequested();
+
+        MarkDeclined(checkoutName, step.CommandHash);
 
         ServiceSourcesLog.Information(
             logger,

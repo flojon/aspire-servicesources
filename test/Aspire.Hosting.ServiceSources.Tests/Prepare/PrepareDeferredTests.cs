@@ -1376,6 +1376,156 @@ public class PrepareDeferredTests
         Assert.Single(DeferredCheckout.For(builder).Snapshot());
     }
 
+    /// <summary>Warm checkout, then one deferred start per member, all sharing the "routing" checkout.</summary>
+    private static async Task<(FakeRunner Runner, IServiceProvider Services, IDistributedApplicationBuilder Builder, IReadOnlyList<IResource> Resources)>
+        StartGroupAsync(FakeInteractionService interaction, TimeProvider? time, params (string Name, PrepareMetadata Prepare)[] members)
+    {
+        var (dir, git, journal) = await WarmCheckoutAsync();
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        builder.Services.AddSingleton<IInteractionService>(interaction);
+        if (time is not null)
+        {
+            builder.Services.AddSingleton(time);
+        }
+
+        var runner = new FakeRunner(journal);
+        var source = new LocalProjectSource(git, runner);
+        var resources = members
+            .Select(m => source.Resolve(builder, m.Name, GroupMember(m.Name, KindName, m.Prepare), DevConfig()).Resource)
+            .ToList();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        foreach (var resource in resources)
+        {
+            await PublishNotStartedAsync(services, resource);
+        }
+
+        return (runner, services, builder, resources);
+    }
+
+    /// <summary>Reads the live stream rather than a snapshot, which can trail a publish that just completed.</summary>
+    private static async Task AssertAllReachAsync(
+        IServiceProvider services, IReadOnlyList<IResource> resources, string state)
+    {
+        var pending = resources.Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        await foreach (var @event in services.GetRequiredService<ResourceNotificationService>()
+                           .WatchAsync(deadline.Token))
+        {
+            if (string.Equals(@event.Snapshot.State?.Text, state, StringComparison.Ordinal))
+            {
+                pending.Remove(@event.Resource.Name);
+            }
+
+            if (pending.Count == 0)
+            {
+                return;
+            }
+        }
+
+        Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Declined_SecondSiblingIsSkippedWithoutASecondPrompt()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
+
+        var (runner, services, builder, resources) = await StartGroupAsync(
+            interaction, null, ("api", ChangedMetadata), ("worker", ChangedMetadata));
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+        Assert.Equal(0, runner.Runs);
+        await AssertAllReachAsync(services, resources, "Skipped");
+    }
+
+    [Fact]
+    public async Task ChangedCommand_DialogClosed_IsRememberedForSiblings()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Cancel<bool>() };
+
+        var (_, _, builder, _) = await StartGroupAsync(
+            interaction, null, ("api", ChangedMetadata), ("worker", ChangedMetadata));
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_PromptThrows_IsRememberedForSiblings()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Throw = new InvalidOperationException("no dashboard") };
+
+        var (_, _, builder, _) = await StartGroupAsync(
+            interaction, null, ("api", ChangedMetadata), ("worker", ChangedMetadata));
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Timeout_IsRememberedForSiblings()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+
+        var (_, _, builder, _) = await StartGroupAsync(
+            interaction, time, ("api", ChangedMetadata), ("worker", ChangedMetadata));
+        var tasks = StartTasksAsync(builder);
+        await interaction.WaitForConfirmAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
+        await tasks;
+
+        Assert.Equal(1, interaction.ConfirmCount);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_SiblingWithDifferentCommandHash_StillAsks()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
+        var other = new PrepareMetadata { Command = ["bash", "-c", "other"] };
+
+        var (_, _, builder, _) = await StartGroupAsync(
+            interaction, null, ("api", ChangedMetadata), ("worker", other));
+        await StartTasksAsync(builder);
+
+        Assert.Equal(2, interaction.ConfirmCount);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_HostShutdownWhileAsking_IsNotRemembered()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true };
+
+        var (_, services, builder, _) = await StartGroupAsync(interaction, null, ("api", ChangedMetadata));
+        var tasks = StartTasksAsync(builder);
+        await interaction.WaitForConfirmAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+        await tasks;
+
+        Assert.False(DeferredCheckout.For(builder).WasDeclined("routing", StepFor(ChangedMetadata).CommandHash));
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Approved_IsNotRemembered_SiblingSeesNothingChanged()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(true) };
+
+        var (runner, _, builder, _) = await StartGroupAsync(
+            interaction, null, ("api", ChangedMetadata), ("worker", ChangedMetadata));
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+        Assert.Equal(1, runner.Runs);
+        Assert.False(DeferredCheckout.For(builder).WasDeclined("routing", StepFor(ChangedMetadata).CommandHash));
+    }
+
     [Fact]
     public async Task GatedSibling_PullsLaterDefaultTimingSiblingWhoseOwnStepLooksUnchanged_IntoDeferral()
     {
