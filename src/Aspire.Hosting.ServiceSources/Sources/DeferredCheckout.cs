@@ -114,6 +114,20 @@ internal sealed class DeferredCheckout
     private bool _enabled = true;
 
     /// <summary>
+    /// Whether the AppHost asked for <see cref="CheckoutTiming.Eager"/> and nothing later undid it.
+    /// </summary>
+    internal bool IsExplicitEager
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_enabled;
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether <see cref="ShouldDefer"/> — the decision point the doc comment on
     /// <c>SetCheckoutTiming</c> means by "before the first AddService" — has run for any service
     /// yet. Guards <see cref="SetTiming"/> the way <c>ServiceSourcesConfigCache</c>'s <c>_frozen</c>
@@ -342,16 +356,35 @@ internal sealed class DeferredCheckout
 
         // The one warm case that is deferred: the marker lives in the checkout, so only a checkout
         // that exists can show its command changed, and the prompt needs the dashboard.
-        return prepareStep is not null
-            && gitClient is not null
-            && LocalGitCheckout.IsManagedCheckout(config)
-            && CheckoutPreparation.WouldRunBecauseCommandChanged(
-                serviceName,
-                prepareStep,
-                LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),
-                builder.AppHostDirectory,
-                managedCheckout: true,
-                gitClient);
+        return NeedsChangedCommandGate(builder, serviceName, definition, config, prepareStep, gitClient);
+    }
+
+    /// <summary>
+    /// Whether a warm managed checkout's prepare command differs from the one that last succeeded
+    /// there, in run mode. The one predicate the deferred and eager paths both gate on, so they
+    /// cannot disagree about what counts as changed.
+    /// </summary>
+    internal static bool NeedsChangedCommandGate(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, PrepareStep? prepareStep, IGitClient? gitClient)
+    {
+        if (prepareStep is null
+            || gitClient is null
+            || !builder.ExecutionContext.IsRunMode
+            || !LocalGitCheckout.IsManagedCheckout(config)
+            || LocalGitCheckout.IsColdManagedCheckout(
+                builder.AppHostDirectory, definition.Repository.CheckoutName, config))
+        {
+            return false;
+        }
+
+        return CheckoutPreparation.WouldRunBecauseCommandChanged(
+            serviceName,
+            prepareStep,
+            LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),
+            builder.AppHostDirectory,
+            managedCheckout: true,
+            gitClient);
     }
 
     /// <summary>

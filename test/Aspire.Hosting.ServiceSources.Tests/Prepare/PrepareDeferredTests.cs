@@ -1277,4 +1277,103 @@ public class PrepareDeferredTests
         Assert.Equal(1, interaction.ConfirmCount);
         Assert.Equal(1, runner.Runs);
     }
+
+    private static readonly PrepareMetadata ChangedMetadata = new() { Command = ["bash", "-c", "changed"] };
+
+    [Fact]
+    public void IsExplicitEager_FalseByDefault_TrueAfterEager_FalseAfterLaterDeferred()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(CreateAppHostDirectory("routing"));
+        var deferred = DeferredCheckout.For(builder);
+
+        Assert.False(deferred.IsExplicitEager);
+
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        Assert.True(deferred.IsExplicitEager);
+
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        Assert.False(deferred.IsExplicitEager);
+    }
+
+    [Fact]
+    public async Task NeedsChangedCommandGate_WarmChangedManaged_True()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        Assert.True(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(ChangedMetadata), git));
+    }
+
+    [Fact]
+    public async Task NeedsChangedCommandGate_UnchangedHash_False()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(Prepare()), git));
+    }
+
+    [Fact]
+    public async Task NeedsChangedCommandGate_AlwaysMode_False()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(Prepare("always")), git));
+    }
+
+    [Fact]
+    public void NeedsChangedCommandGate_Cold_False()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(CreateAppHostDirectory("routing"));
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(ChangedMetadata), new FakeGitClient()));
+    }
+
+    [Fact]
+    public void NeedsChangedCommandGate_FirstUseNoMarker_False()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(dir, "routing"), ".git"));
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(ChangedMetadata), new FakeGitClient()));
+    }
+
+    [Fact]
+    public void NeedsChangedCommandGate_DebrisDirectoryNoGit_FalseAndDoesNotThrow()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        Directory.CreateDirectory(LocalGitCheckout.ManagedRepoRoot(dir, "routing"));
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(ChangedMetadata), new FakeGitClient()));
+    }
+
+    [Fact]
+    public async Task NeedsChangedCommandGate_PathSource_False()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        var config = new ServiceDeveloperConfig { Source = "repository", Repository = new() { Path = dir } };
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), config, StepFor(ChangedMetadata), git));
+    }
+
+    [Fact]
+    public async Task NeedsChangedCommandGate_PublishMode_False()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+
+        Assert.False(DeferredCheckout.NeedsChangedCommandGate(
+            builder, "routing", Definition("routing"), DevConfig(), StepFor(ChangedMetadata), git));
+    }
 }
