@@ -93,6 +93,16 @@ never existed. Check the tag of the last release before adding one.
   one the developer stopped, and one that Aspire could not launch are not restarted. Consumers see
   the same local port again but any connection open through the old tunnel is gone, so they must
   reconnect. See [the `"kubernetes"` source](docs/sources/kubernetes.md#readiness-and-a-dead-tunnel).
+- **A changed `prepare` command no longer runs unprompted under `SetCheckoutTiming(CheckoutTiming.Eager)`
+  or for a kind that cannot defer** ([#433]). The confirmation added in 0.8.0 only covered services
+  that resolve on the deferred path. A warm checkout whose catalog command changed now makes
+  `AddService` throw for such a service, naming it and the command, before anything runs or the
+  marker is written. Continue by removing the explicit Eager timing so the dashboard asks, or, for
+  a kind that cannot defer, by deleting the marker file the message names (or the checkout
+  directory), after which the next start is a first use. It fails on every start until then, CI
+  included. A declined command is also remembered for the rest of the run, so services sharing
+  a checkout ask once instead of once each. See
+  [a changed command asks first](docs/sources/repository.md).
 
 ### Fixed
 
@@ -2209,3 +2219,4 @@ Targets `net10.0`.
 [#486]: https://github.com/flojon/aspire-servicesources/issues/486
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
 [#479]: https://github.com/flojon/aspire-servicesources/issues/479
+[#433]: https://github.com/flojon/aspire-servicesources/issues/433

@@ -17,7 +17,9 @@ public enum CheckoutTiming
     /// <summary>
     /// <c>AddService()</c> blocks until the checkout it needs is on disk, with full launch-profile
     /// fidelity and no resource started after <c>Build()</c> returns. The pre-0.8.0 default, for an
-    /// AppHost that needs every service running by the time <c>Build()</c> returns.
+    /// AppHost that needs every service running by the time <c>Build()</c> returns. Nothing can ask
+    /// about a changed <c>prepare</c> command here, so <c>AddService()</c> throws for one instead of
+    /// running it.
     /// </summary>
     Eager,
 }

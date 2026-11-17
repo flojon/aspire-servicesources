@@ -52,14 +52,22 @@ unprompted.
 
 It is a consent gate, not a picker, so it fails closed: **only an explicit "Run" runs the step.**
 Closing the dialog, no answer within 5 minutes, or a dialog that cannot be shown all decline, and
-the service shows `Skipped` rather than starting; restart the AppHost to be asked again. That
+the service shows `Skipped` rather than starting; restart the AppHost to be asked again, though a decline
+is remembered per checkout and command for the rest of the run, so siblings sharing the checkout
+are skipped without asking again. That
 deliberately differs from the cold-checkout source pick, where an unanswered dialog starts every
 service. Anything waiting on a skipped service keeps waiting. With no dashboard to ask through (`aspire run` without one, CI), nothing can ask, so the
-step runs unprompted and the log says why. `aspire publish` never runs the step. `SetCheckoutTiming(CheckoutTiming.Eager)`
-and a kind that cannot be deferred (a custom kind, some `javascript` app types, or one whose
-`ResolveDeferred` returns null) also keep running a changed command unprompted. Services sharing a
-checkout share one completion marker, so one such member runs and records the changed command and the
-deferred members then find nothing changed: it removes the prompt for the whole repository.
+step runs unprompted and the log says why. `aspire publish` never runs the step.
+
+Nothing can ask for `SetCheckoutTiming(CheckoutTiming.Eager)` or for a kind that cannot be deferred
+(a custom kind, some `javascript` app types, or one whose `ResolveDeferred` returns null), so those
+fail closed too: `AddService` throws, naming the service, before the command runs or the marker
+is written. Services sharing a checkout share one completion marker, and a blocked member records
+nothing, so its deferred siblings still see the change and ask. To continue, drop the explicit Eager
+timing (so the dashboard asks) or, for a kind that cannot defer, delete the marker file the message
+names or the checkout directory. Either way the next start is a first use, which runs unprompted
+(a cold clone is your consent to the repository), so deleting the marker means you have accepted
+the command yourself. This fails on every start, CI included, until the marker is cleared.
 
 The cost: that one run is registered before the checkout is read, like a first-run clone, so it
 loses composition-time launch-profile fidelity (a `dotnet` service should declare its own

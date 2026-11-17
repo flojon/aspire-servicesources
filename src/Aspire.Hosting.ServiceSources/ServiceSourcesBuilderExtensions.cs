@@ -254,7 +254,8 @@ public static class ServiceSourcesBuilderExtensions
     /// <c>Build()</c> returns calls <c>builder.SetCheckoutTiming(CheckoutTiming.Eager)</c> to keep
     /// the pre-0.8.0 behaviour, permanently rather than as a migration window — there is no way for
     /// the package to detect that an AppHost relies on the old ordering, so the opt-out is not
-    /// scheduled for removal.
+    /// scheduled for removal. Eager timing cannot ask about a changed <c>prepare</c> command, so
+    /// <c>AddService</c> throws for one instead of running it unprompted.
     /// </para>
     /// <para>
     /// With a dashboard to ask through, deferred timing also asks once which cold services to clone

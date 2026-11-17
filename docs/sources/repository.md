@@ -299,11 +299,21 @@ does.
 A service deferred only for this reason is left out of the source pick: it has nothing to clone, so
 the pick neither asks about it nor skips it, and a saved `selection.json` entry for it is ignored.
 
-`aspire publish`, `SetCheckoutTiming(CheckoutTiming.Eager)` and a kind that cannot defer (a custom
-kind, some `javascript` app types) keep today's unprompted behaviour. Services that share one
-checkout share one completion marker, so one such member runs the changed command and records it,
-and the deferred members then find nothing changed and do not ask. Services sharing a checkout are
-also asked one at a time, and after a decline the next one asks again.
+`aspire publish` never runs the step, so it is not asked about.
+
+**Nothing to ask through means a failure, not a silent run.** `SetCheckoutTiming(CheckoutTiming.Eager)`
+and a kind that cannot defer (a custom kind, some `javascript` app types, or one whose
+`ResolveDeferred` returns null) cannot show the dialog, so a changed command makes `AddService`
+throw instead of running it. The message names the service, shows the command and gives the way
+out: remove the explicit Eager timing so the dashboard asks (only where the kind can defer), or run the
+command yourself and accept it by deleting the marker file the message names (or the checkout
+directory), which makes the next start a first use, and a first use runs unprompted. Nothing is run and
+no marker is written before the failure, so services sharing the checkout still see the change.
+It fails on every start, CI included, until the marker is cleared.
+
+Services that share one checkout share one completion marker and are asked one at a time. A decline
+is remembered for the rest of the run, per checkout and command, so the siblings are skipped without
+asking again; they ask again on the next AppHost start.
 
 **Your own directory declares its own step.** A service pointed at your own directory — the
 [`"path"` source](path.md) with `path.path`, or the deprecated `repository.path` — **never inherits the catalog's
@@ -583,7 +593,8 @@ is now started after it instead, and only after you have been asked which cold s
 which is visible to anything in your AppHost that assumed otherwise. An AppHost that needs every service running by the time `Build()` returns opts out
 permanently with `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, called before your first
 `AddService()`, which is where the decision is made — the same ordering `AddServiceCatalog()`
-requires. A call made after any service has already resolved throws
+requires. Eager timing has no dashboard to ask through, so a changed `prepare` command makes
+`AddService()` throw rather than run (see "A changed command asks first"). A call made after any service has already resolved throws
 `ServiceSourcesConfigurationException` naming the service, rather than silently having no effect
 on it. `UseDeferredCheckout()` is obsolete — it is redundant now that deferred is the default (it still overrides an earlier `SetCheckoutTiming(CheckoutTiming.Eager)`).
 
