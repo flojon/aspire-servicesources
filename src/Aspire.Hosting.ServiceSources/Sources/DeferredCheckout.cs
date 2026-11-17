@@ -388,6 +388,32 @@ internal sealed class DeferredCheckout
     }
 
     /// <summary>
+    /// The failure for a service that would run a changed prepare command with nothing to ask
+    /// through. Thrown before the command runs or the marker is written, so a deferred sibling still
+    /// sees the change.
+    /// </summary>
+    /// <param name="canDefer">Whether dropping the explicit eager timing would let the dashboard ask.</param>
+    internal static ServiceSourcesConfigurationException BlockedChangedCommand(
+        string serviceName, ServiceDefinition definition, PrepareStep step, string appHostDirectory, bool canDefer)
+    {
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName);
+        var marker = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout: true);
+
+        var timingHint = canDefer
+            ? Raw.Literal("Remove SetCheckoutTiming(CheckoutTiming.Eager) (or call SetCheckoutTiming(CheckoutTiming.Deferred)) so the dashboard can ask first, or ")
+            : Raw.Literal("Nothing can ask here, so ");
+
+        var hatch = marker is null
+            ? Raw.Compose($"delete the checkout directory {Raw.Display(repoRoot)}")
+            : Raw.Compose($"delete the marker {Raw.Display(marker)} or the checkout directory {Raw.Display(repoRoot)}");
+
+        return ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': the catalog's prepare command changed since it last succeeded in this "
+            + $"checkout, and it would run here without asking: {CheckoutPreparation.DescribeCommand(step)}. "
+            + $"{timingHint}run it yourself and accept it: {hatch}. The next start is then a first use, which runs unprompted.");
+    }
+
+    /// <summary>
     /// Registers the project resource for a service whose checkout has not happened yet, and
     /// arranges for the checkout — and the start — to run after the host is up.
     /// </summary>

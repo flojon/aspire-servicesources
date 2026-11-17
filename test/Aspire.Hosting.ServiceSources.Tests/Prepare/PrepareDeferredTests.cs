@@ -157,10 +157,12 @@ public class PrepareDeferredTests
     /// A kind shaped like java's: it builds its whole resource from the catalog and hands back the
     /// one check that needs the working tree — which here looks for the artifact the step produces.
     /// </summary>
-    private sealed class StandInKind(Journal journal, string requires, bool withHelper = false)
+    private sealed class StandInKind(
+        Journal journal, string requires, bool withHelper = false, bool supportsDeferred = true,
+        bool resolveDeferredReturnsNull = false)
         : ILocalResourceKind
     {
-        public bool SupportsDeferredCheckout(object? rawConfig) => true;
+        public bool SupportsDeferredCheckout(object? rawConfig) => supportsDeferred;
 
         public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
@@ -168,6 +170,7 @@ public class PrepareDeferredTests
 
         public DeferredLocalResource? ResolveDeferred(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            resolveDeferredReturnsNull ? null :
             new()
             {
                 Service = Add(builder, serviceName, repoRoot),
@@ -1279,6 +1282,170 @@ public class PrepareDeferredTests
     }
 
     private static readonly PrepareMetadata ChangedMetadata = new() { Command = ["bash", "-c", "changed"] };
+
+    private sealed record Attempt(
+        ServiceSourcesConfigurationException? Error, FakeRunner Runner, IDistributedApplicationBuilder Builder,
+        string MarkerPath, string MarkerBefore)
+    {
+        public string? MarkerAfter => File.Exists(MarkerPath) ? File.ReadAllText(MarkerPath) : null;
+    }
+
+    /// <summary>Resolves "routing" once against a warm checkout, returning what it threw instead of letting it escape.</summary>
+    private static async Task<Attempt> ResolveWarmAsync(
+        CheckoutTiming? timing, PrepareMetadata prepare, bool supportsDeferred = true,
+        bool resolveDeferredReturnsNull = false, bool publish = false, ServiceDeveloperConfig? config = null)
+    {
+        var (dir, git, journal) = await WarmCheckoutAsync();
+        var markerPath = PrepareMarker.LocationFor(
+            "routing", LocalGitCheckout.ManagedRepoRoot(dir, "routing"), dir, managedCheckout: true)!;
+        var before = File.ReadAllText(markerPath);
+
+        var builder = publish ? TestHelpers.CreatePublishingBuilder(dir) : TestHelpers.CreateBuilderThatCanStart(dir);
+        if (timing is { } t)
+        {
+            builder.SetCheckoutTiming(t);
+        }
+
+        builder.AddLocalKind(
+            KindName, new StandInKind(journal, "prepare.sh", supportsDeferred: supportsDeferred,
+                resolveDeferredReturnsNull: resolveDeferredReturnsNull));
+        var runner = new FakeRunner(journal);
+
+        ServiceSourcesConfigurationException? error = null;
+        try
+        {
+            new LocalProjectSource(git, runner).Resolve(
+                builder, "routing", Definition("routing", prepare), config ?? DevConfig());
+        }
+        catch (ServiceSourcesConfigurationException ex)
+        {
+            error = ex;
+        }
+
+        return new Attempt(error, runner, builder, markerPath, before);
+    }
+
+    [Fact]
+    public async Task ExplicitEager_WarmChangedCommand_AddServiceThrowsNamingServiceAndTheWayOut()
+    {
+        var attempt = await ResolveWarmAsync(CheckoutTiming.Eager, ChangedMetadata);
+
+        var error = Assert.IsType<ServiceSourcesConfigurationException>(attempt.Error);
+        Assert.Contains("routing", error.Message, StringComparison.Ordinal);
+        Assert.Contains(ChangedCommandLine, error.Message, StringComparison.Ordinal);
+        Assert.Contains(attempt.MarkerPath, error.Message, StringComparison.Ordinal);
+        Assert.Contains("SetCheckoutTiming(CheckoutTiming.Deferred)", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, attempt.Runner.Runs);
+        Assert.Equal(attempt.MarkerBefore, attempt.MarkerAfter);
+    }
+
+    [Fact]
+    public async Task NonDeferrableKind_SupportsDeferredCheckoutFalse_WarmChangedCommand_Throws()
+    {
+        var attempt = await ResolveWarmAsync(timing: null, ChangedMetadata, supportsDeferred: false);
+
+        var error = Assert.IsType<ServiceSourcesConfigurationException>(attempt.Error);
+        Assert.Contains(attempt.MarkerPath, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetCheckoutTiming", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, attempt.Runner.Runs);
+        Assert.Equal(attempt.MarkerBefore, attempt.MarkerAfter);
+    }
+
+    [Fact]
+    public async Task KindResolveDeferredReturnsNull_WarmChangedCommand_Throws()
+    {
+        var attempt = await ResolveWarmAsync(timing: null, ChangedMetadata, resolveDeferredReturnsNull: true);
+
+        var error = Assert.IsType<ServiceSourcesConfigurationException>(attempt.Error);
+        Assert.DoesNotContain("SetCheckoutTiming", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, attempt.Runner.Runs);
+        Assert.Equal(attempt.MarkerBefore, attempt.MarkerAfter);
+    }
+
+    [Fact]
+    public async Task ExplicitEager_WarmUnchangedCommand_RunsAsToday()
+    {
+        var attempt = await ResolveWarmAsync(CheckoutTiming.Eager, Prepare());
+
+        Assert.Null(attempt.Error);
+        Assert.Equal(0, attempt.Runner.Runs);
+    }
+
+    [Fact]
+    public async Task ExplicitEager_ColdCheckout_NoMarker_RunsAsToday()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var journal = new Journal();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        var runner = new FakeRunner(journal);
+
+        new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, "routing", Definition("routing", ChangedMetadata), DevConfig());
+
+        Assert.Equal(1, runner.Runs);
+    }
+
+    [Fact]
+    public async Task AlwaysMode_ChangedHash_DoesNotThrow()
+    {
+        var attempt = await ResolveWarmAsync(CheckoutTiming.Eager, new PrepareMetadata
+        {
+            Command = ["bash", "-c", "changed"], Mode = "always",
+        });
+
+        Assert.Null(attempt.Error);
+        Assert.Equal(1, attempt.Runner.Runs);
+    }
+
+    [Fact]
+    public async Task PublishMode_ChangedHash_DoesNotThrow()
+    {
+        var attempt = await ResolveWarmAsync(CheckoutTiming.Eager, ChangedMetadata, publish: true);
+
+        Assert.Null(attempt.Error);
+        Assert.Equal(0, attempt.Runner.Runs);
+    }
+
+    [Fact]
+    public async Task PathSource_ChangedHash_DoesNotThrow()
+    {
+        var path = TempDirectories.CreateSubdirectory().FullName;
+        var attempt = await ResolveWarmAsync(
+            CheckoutTiming.Eager, ChangedMetadata,
+            config: new ServiceDeveloperConfig { Source = "repository", Repository = new() { Path = path } });
+
+        Assert.Null(attempt.Error);
+        Assert.Equal(attempt.MarkerBefore, attempt.MarkerAfter);
+    }
+
+    [Fact]
+    public async Task DefaultTimingDeferrableKind_ChangedCommand_StillDefersAndPrompts()
+    {
+        var attempt = await ResolveWarmAsync(timing: null, ChangedMetadata);
+
+        Assert.Null(attempt.Error);
+        Assert.Single(DeferredCheckout.For(attempt.Builder).Snapshot());
+        Assert.Equal(0, attempt.Runner.Runs);
+    }
+
+    [Fact]
+    public async Task SetCheckoutTimingDeferredAfterEager_ClearsTheBlock()
+    {
+        var (dir, git, journal) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        var runner = new FakeRunner(journal);
+
+        new LocalProjectSource(git, runner)
+            .Resolve(builder, "routing", Definition("routing", ChangedMetadata), DevConfig());
+
+        Assert.Single(DeferredCheckout.For(builder).Snapshot());
+        Assert.Equal(0, runner.Runs);
+    }
 
     [Fact]
     public void IsExplicitEager_FalseByDefault_TrueAfterEager_FalseAfterLaterDeferred()
