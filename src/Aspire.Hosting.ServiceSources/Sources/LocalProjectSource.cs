@@ -122,6 +122,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         var prefetch = LocalCheckoutPrefetch.For(builder, gitClient);
 
         var deferred = DeferredCheckout.For(builder);
+        var deferralDeclined = false;
 
         if (deferred.ShouldDefer(builder, serviceName, definition, config, prepare.Step, gitClient))
         {
@@ -151,6 +152,18 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             {
                 return registered;
             }
+
+            deferralDeclined = true;
+        }
+
+        // Before the checkout lock and any fetch, so a blocked service touches nothing.
+        if (prepare.Step is not null
+            && DeferredCheckout.NeedsChangedCommandGate(builder, serviceName, definition, config, prepare.Step, gitClient))
+        {
+            throw DeferredCheckout.BlockedChangedCommand(
+                serviceName, definition, prepare.Step, builder.AppHostDirectory,
+                // Dropping Eager only helps a kind that would then defer.
+                canDefer: !deferralDeclined && (isDotnetKind || SupportsDeferredKind(serviceName, definition, handler!)));
         }
 
         // Blocks on this service's checkout. Usually that checkout was started on the first

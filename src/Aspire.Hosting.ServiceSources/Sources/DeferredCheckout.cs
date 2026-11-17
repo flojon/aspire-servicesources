@@ -113,6 +113,40 @@ internal sealed class DeferredCheckout
     /// </summary>
     private bool _enabled = true;
 
+    private readonly HashSet<string> _gatedCheckouts = new(StringComparer.Ordinal);
+
+    private readonly HashSet<(string CheckoutName, string CommandHash)> _declined = [];
+
+    internal bool WasDeclined(string checkoutName, string commandHash)
+    {
+        lock (_gate)
+        {
+            return _declined.Contains((checkoutName, commandHash));
+        }
+    }
+
+    private void MarkDeclined(string checkoutName, string commandHash)
+    {
+        lock (_gate)
+        {
+            _declined.Add((checkoutName, commandHash));
+        }
+    }
+
+    /// <summary>
+    /// Whether the AppHost asked for <see cref="CheckoutTiming.Eager"/> and nothing later undid it.
+    /// </summary>
+    internal bool IsExplicitEager
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_enabled;
+            }
+        }
+    }
+
     /// <summary>
     /// Whether <see cref="ShouldDefer"/> — the decision point the doc comment on
     /// <c>SetCheckoutTiming</c> means by "before the first AddService" — has run for any service
@@ -342,16 +376,82 @@ internal sealed class DeferredCheckout
 
         // The one warm case that is deferred: the marker lives in the checkout, so only a checkout
         // that exists can show its command changed, and the prompt needs the dashboard.
-        return prepareStep is not null
-            && gitClient is not null
-            && LocalGitCheckout.IsManagedCheckout(config)
-            && CheckoutPreparation.WouldRunBecauseCommandChanged(
-                serviceName,
-                prepareStep,
-                LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),
-                builder.AppHostDirectory,
-                managedCheckout: true,
-                gitClient);
+        if (NeedsChangedCommandGate(builder, serviceName, definition, config, prepareStep, gitClient))
+        {
+            lock (_gate)
+            {
+                _gatedCheckouts.Add(definition.Repository.CheckoutName);
+            }
+
+            return true;
+        }
+
+        // A sibling whose own step looks unchanged still waits with the gated one, so the group
+        // is asked together instead of one member composing against a checkout another bootstraps.
+        // Requires a step: the prefetch asks without one and must not see a different answer.
+        if (prepareStep is not null && LocalGitCheckout.IsManagedCheckout(config))
+        {
+            lock (_gate)
+            {
+                return _gatedCheckouts.Contains(definition.Repository.CheckoutName);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a warm managed checkout's prepare command differs from the one that last succeeded
+    /// there, in run mode. The one predicate the deferred and eager paths both gate on, so they
+    /// cannot disagree about what counts as changed.
+    /// </summary>
+    internal static bool NeedsChangedCommandGate(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, PrepareStep? prepareStep, IGitClient? gitClient)
+    {
+        if (prepareStep is null
+            || gitClient is null
+            || !builder.ExecutionContext.IsRunMode
+            || !LocalGitCheckout.IsManagedCheckout(config)
+            || LocalGitCheckout.IsColdManagedCheckout(
+                builder.AppHostDirectory, definition.Repository.CheckoutName, config))
+        {
+            return false;
+        }
+
+        return CheckoutPreparation.WouldRunBecauseCommandChanged(
+            serviceName,
+            prepareStep,
+            LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),
+            builder.AppHostDirectory,
+            managedCheckout: true,
+            gitClient);
+    }
+
+    /// <summary>
+    /// The failure for a service that would run a changed prepare command with nothing to ask
+    /// through. Thrown before the command runs or the marker is written, so a deferred sibling still
+    /// sees the change.
+    /// </summary>
+    /// <param name="canDefer">Whether dropping the explicit eager timing would let the dashboard ask.</param>
+    internal static ServiceSourcesConfigurationException BlockedChangedCommand(
+        string serviceName, ServiceDefinition definition, PrepareStep step, string appHostDirectory, bool canDefer)
+    {
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName);
+        var marker = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout: true);
+
+        var timingHint = canDefer
+            ? Raw.Literal("Remove SetCheckoutTiming(CheckoutTiming.Eager) (or call SetCheckoutTiming(CheckoutTiming.Deferred)) so the dashboard can ask first, or ")
+            : Raw.Literal("Nothing can ask here, so ");
+
+        var hatch = marker is null
+            ? Raw.Compose($"delete the checkout directory {Raw.Display(repoRoot)}")
+            : Raw.Compose($"delete the marker {Raw.Display(marker)} or the checkout directory {Raw.Display(repoRoot)}");
+
+        return ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': the catalog's prepare command changed since it last succeeded in this "
+            + $"checkout, and it would run here without asking: {CheckoutPreparation.DescribeCommand(step)}. "
+            + $"{timingHint}run it yourself and accept it: {hatch}. The next start is then a first use, which runs unprompted.");
     }
 
     /// <summary>
@@ -1304,7 +1404,7 @@ internal sealed class DeferredCheckout
     /// checkout that fails now costs one service, not the whole AppHost. The developer's route to
     /// it is the dashboard, so that is where it is put.
     /// </remarks>
-    private static async Task StartDeferredAsync(
+    private async Task StartDeferredAsync(
         Deferred deferred, IServiceProvider services, CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken)
     {
         // Declared out here so the failure report can tell what this failure is not about.
@@ -1526,7 +1626,7 @@ internal sealed class DeferredCheckout
     /// the developer already ran or accepted by cloning. Without a dashboard nothing can ask, so the
     /// step runs unprompted as it always has.
     /// </remarks>
-    private static async Task<bool> ConfirmChangedCommandAsync(
+    private async Task<bool> ConfirmChangedCommandAsync(
         Deferred deferred, PrepareStep step, Raw label, string repoRoot, IServiceProvider services,
         ResourceNotificationService notifications, ILogger logger, CancellationToken stoppingToken)
     {
@@ -1539,6 +1639,18 @@ internal sealed class DeferredCheckout
                 deferred.GitClient))
         {
             return true;
+        }
+
+        var checkoutName = deferred.Definition.Repository.CheckoutName;
+
+        // Siblings share the checkout and its marker, so one answer covers them all.
+        if (WasDeclined(checkoutName, step.CommandHash))
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"Skipped: this prepare command was already declined for the shared checkout, so it is not asked again this run.");
+
+            return false;
         }
 
         var interaction = services.GetService<IInteractionService>();
@@ -1599,6 +1711,8 @@ internal sealed class DeferredCheckout
         }
 
         stoppingToken.ThrowIfCancellationRequested();
+
+        MarkDeclined(checkoutName, step.CommandHash);
 
         ServiceSourcesLog.Information(
             logger,
