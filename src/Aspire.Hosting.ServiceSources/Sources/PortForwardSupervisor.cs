@@ -54,6 +54,10 @@ internal interface IPortForwardControl
 /// resource, or once the AppHost is shutting down.
 /// </para>
 /// <para>
+/// Readiness is read from the tunnel's own health report only, so a check the AppHost author added
+/// to the service cannot read as a dead tunnel.
+/// </para>
+/// <para>
 /// Not verified against a real cluster or a real DCP: the decisions are tested through
 /// <see cref="IPortForwardControl"/>, and the Aspire-facing half (<see cref="AspireControl"/>) is a
 /// thin wrapper over documented APIs.
@@ -234,14 +238,18 @@ internal sealed class PortForwardSupervisor(
 
             // A report has to be there to read: Aspire calls a Running resource with no checks Healthy,
             // and "Running" is exactly what this class exists to not take for "the tunnel is up".
-            if (snapshot.HealthReports.Length > 0 && snapshot.HealthStatus == HealthStatus.Healthy)
+            // Only the tunnel's own report: a check the author added must not read as a dead tunnel.
+            var tunnelKey = KubernetesSource.HealthCheckKey(serviceName);
+            var tunnel = snapshot.HealthReports.FirstOrDefault(r => r.Name == tunnelKey);
+
+            if (tunnel is { Status: HealthStatus.Healthy })
             {
                 _ready = true;
                 _healthySince ??= timeProvider.GetUtcNow();
                 _unhealthySince = null;
                 _warnedUnhealthy = false;
             }
-            else if (snapshot.HealthReports.Length > 0)
+            else if (tunnel is { Status: HealthStatus.Unhealthy or HealthStatus.Degraded })
             {
                 // kubectl is alive but the tunnel does not accept connections, which nothing else
                 // reports: a Service with no ready pods behind it leaves kubectl running and the port closed.

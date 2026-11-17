@@ -114,6 +114,28 @@ A tunnel that is running but has not accepted a connection for 60s (typically a 
 pods behind it, which leaves `kubectl` running with the port closed) is logged once as a warning with
 `kubectl`'s last line. It is not restarted, and a consumer that `WaitFor`s the service stays held.
 
+**Health checks.** `WithHttpHealthCheck` and `WithHealthCheck` on a `"kubernetes"` service apply to the
+port-forward's resource and probe the service through the tunnel. `WaitFor` holds until the built-in TCP
+check **and** your check both pass. A failing check of yours shows in the dashboard health badge; it does
+not restart the tunnel, does not mark it `FailedToStart`, and does not raise the "no connection" warning,
+which follow only the tunnel's own check. The tunnel's report is read once it has a result, so that
+warning can come one probe interval later than the tunnel failing, and when Aspire runs a resource's
+checks as one batch a slow check of yours may delay the tunnel's report. `WithAnnotation(..., Replace)` of
+a health check is treated as an append, so the tunnel's own check is never removed. Things to know:
+
+- A checked-in `WithHttpHealthCheck` sends real GET requests to whichever context
+  `servicesources.local.json` selects, with no credentials.
+- The tunnel's endpoint is named after its scheme, so on an `https` service pass the endpoint name:
+  `WithHttpHealthCheck("/health", endpointName: "https")`. The certificate is the pod's and the host name
+  is `localhost`, so the probe is `Unhealthy` unless that certificate is trusted for `localhost`, and
+  `WaitFor` then holds. Certificate validation is not relaxed. Remove the check or trust the certificate
+  to release a held `WaitFor`.
+- Aspire's default redirect handling applies, so a workload that answers the probe with a redirect can
+  send it elsewhere (each hop is a GET whose response is ignored). Keep checks on a path you trust. That
+  residual risk is accepted.
+- The probe goes to a loopback port. If a foreign process holds that port, it answers the probe, and a
+  `Healthy` check does not prove the tunnel is yours. Restart the resource if you suspect a port clash.
+
 This is deliberately modest:
 
 - Nothing is restarted when the developer stops the resource, when the AppHost is shutting down, or
