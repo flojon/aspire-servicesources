@@ -120,7 +120,9 @@ directory" here to protect. A `path.path` override is the exception, exactly lik
 it points at your own working tree, which nothing establishes is a checkout of what the catalog
 names, so the catalog's step is not run there — a startup notice shows the command, ready to paste
 into your own `path.prepare` block. Only a `path.prepare` you declare runs in that directory. Two
-services sharing one resolved `path` serialize their step rather than run it concurrently. The
+services sharing one resolved `path` serialize their step rather than run it concurrently, and when
+their step is identical — the same command and the same `mode` — it runs once for the first of them
+rather than once per service (a different command or mode runs separately). The
 marker lives where a `repository.path` override's does,
 `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path and the
 command.
@@ -128,6 +130,8 @@ command.
 A service grouped into a `repositories:` entry doesn't inherit that repository's `prepare:` under
 `"path"`: the group's step is written to run once at the root of its shared checkout, not in one
 member's directory once per member. Only a `path.prepare` block the developer declares runs there.
+When several members of a redirected group declare the same `path.prepare` command and mode, it runs once in
+the shared directory, not once per member.
 
 **A group can be pointed at one tree.** A `path` service still has nothing to clone, but setting
 `repositories.<name>` to `{ "source": "path", "path": { "path": "..." } }` in

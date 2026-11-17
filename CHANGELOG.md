@@ -58,6 +58,11 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **Several `"path"` services that resolve to one directory now run an identical `prepare` step once, not once per
+  service** ([#446]). Identical means the same directory, command and `mode`; a different command or mode
+  still runs on its own. It applies to a redirected group's members and to services sharing one `path.path`,
+  within one AppHost start. If you relied on each service running its own copy, give them different commands.
+
 - **A managed clone on Windows whose AppHost directory is too deep for git to keep its git
   directory in place now keeps its git directory in a short one under `%LOCALAPPDATA%\ServiceSources\git`** ([#479]).
   git fails every command with `'$GIT_DIR' too big` once the checkout path passes 215 characters (a
@@ -2220,3 +2225,4 @@ Targets `net10.0`.
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
 [#479]: https://github.com/flojon/aspire-servicesources/issues/479
 [#433]: https://github.com/flojon/aspire-servicesources/issues/433
+[#446]: https://github.com/flojon/aspire-servicesources/issues/446

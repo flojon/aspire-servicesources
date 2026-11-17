@@ -358,7 +358,8 @@ internal sealed class PathSource(
     /// the developer's <c>path.prepare</c> per field (design "prepare: once/always/never only"). Two
     /// services sharing one resolved <paramref name="repoRoot"/> serialize under
     /// <see cref="CheckoutNameLock"/>, keyed on the normalized absolute path, the same discipline a
-    /// managed checkout gets from <see cref="LocalProjectSource"/>.
+    /// managed checkout gets from <see cref="LocalProjectSource"/>, and an identical step (see
+    /// <see cref="PreparedDirectories"/>) runs for the first of them only.
     /// </summary>
     /// <remarks>
     /// Only a catalog-declared <c>path:</c> inherits the catalog's block; a <c>path.path</c> override
@@ -391,11 +392,21 @@ internal sealed class PathSource(
             return;
         }
 
-        using (CheckoutNameLock.For(builder).Acquire(PrepareMarker.NormalizeCheckoutPath(repoRoot)))
+        var directory = PrepareMarker.NormalizeCheckoutPath(repoRoot);
+
+        using (CheckoutNameLock.For(builder).Acquire(directory))
         {
+            // Settled under the lock by an earlier service: its marker, not this one's, records it.
+            if (PreparedDirectories.For(builder).IsSettled(directory, step))
+            {
+                return;
+            }
+
             CheckoutPreparation.RunOrReportSkip(
                 builder, serviceName, PreparePlan.ServiceLabel(serviceName), serviceName, step, repoRoot,
                 managedCheckout: false, _gitClient, _prepareRunner);
+
+            PreparedDirectories.For(builder).MarkSettled(directory, step);
         }
     }
 }

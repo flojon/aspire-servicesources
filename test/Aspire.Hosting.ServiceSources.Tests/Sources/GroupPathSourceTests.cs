@@ -681,4 +681,82 @@ public class GroupPathSourceTests
 
         Assert.Empty(runner.Runs);
     }
+
+    // === prepare: identical steps on one resolved directory run once ===
+
+    private static DirectoryRecordingRunner ResolveTwoRedirectedMembers(
+        PrepareDeveloperConfig? ordersPrepare, PrepareDeveloperConfig? basketPrepare, out string groupDir)
+    {
+        groupDir = ProjectTree("Orders", "Basket");
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var runner = new DirectoryRecordingRunner();
+        var group = PathGroup();
+        group.Path!.Path = groupDir;
+        var source = new PathSource(prepareRunner: runner);
+
+        source.Resolve(
+            builder, "orders", Grouped(),
+            new ServiceDeveloperConfig { Source = "repository", Path = new() { Prepare = ordersPrepare } }, group);
+        source.Resolve(
+            builder, "basket",
+            new ServiceDefinition
+            {
+                Repository = Grouped().Repository, Project = "src/Basket/Basket.csproj",
+                Kind = LocalKinds.Dotnet, Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+            },
+            new ServiceDeveloperConfig { Source = "repository", Path = new() { Prepare = basketPrepare } }, group);
+
+        return runner;
+    }
+
+    [Fact]
+    public void RedirectedMembers_WithTheSamePrepareCommandInOneDirectory_RunItOnce()
+    {
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"] };
+
+        var runner = ResolveTwoRedirectedMembers(prepare, new PrepareDeveloperConfig { Command = ["make", "dev"] }, out _);
+
+        Assert.Single(runner.Runs);
+    }
+
+    [Fact]
+    public void RedirectedMembers_WithDifferentPrepareCommands_RunEach()
+    {
+        var runner = ResolveTwoRedirectedMembers(
+            new PrepareDeveloperConfig { Command = ["make", "dev"] },
+            new PrepareDeveloperConfig { Command = ["make", "other"] }, out _);
+
+        Assert.Equal(2, runner.Runs.Count);
+    }
+
+    [Fact]
+    public void RedirectedMembers_WithTheSameCommandButDifferentModes_RunEach()
+    {
+        var runner = ResolveTwoRedirectedMembers(
+            new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "once" },
+            new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "always" }, out _);
+
+        Assert.Equal(2, runner.Runs.Count);
+    }
+
+    [Fact]
+    public void RedirectedMembers_OnlyOneDeclaresAPrepare_RunsThatOneOnce()
+    {
+        var runner = ResolveTwoRedirectedMembers(
+            null, new PrepareDeveloperConfig { Command = ["make", "dev"] }, out _);
+
+        Assert.Single(runner.Runs);
+    }
+
+    [Fact]
+    public void SeparateComposition_RunsTheSameStepAgain_BecauseDedupeIsPerComposition()
+    {
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "always" };
+
+        var first = ResolveTwoRedirectedMembers(prepare, prepare, out _);
+        var second = ResolveTwoRedirectedMembers(prepare, prepare, out _);
+
+        Assert.Single(first.Runs);
+        Assert.Single(second.Runs);
+    }
 }
