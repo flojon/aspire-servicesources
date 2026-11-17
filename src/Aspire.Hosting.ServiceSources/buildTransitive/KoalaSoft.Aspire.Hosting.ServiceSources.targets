@@ -78,7 +78,7 @@
       above cannot express: there, any prerelease of the floor's version counts as below it. A
       preview of the floor's own version is the thing to accept when it is at least this one, so
       the numeric core is compared as before and, for an equal core, the numbers after "-preview."
-      are compared as a version of their own ("1.26506.6"). A label of any other shape on an equal
+      are compared as a version of their own ("1.26559.7"). A label of any other shape on an equal
       core is left alone rather than failed on: it cannot be ordered here, and the run-time check
       stands behind it. Not checked at all when the Community Toolkit's package is also resolved:
       that one wins at run time, so the official assembly is never loaded.

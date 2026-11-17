@@ -36,7 +36,7 @@ referenced by your AppHost alongside this one — see
 | `kind` | Package | Minimum |
 | --- | --- | --- |
 | `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
-| `java` | or `Aspire.Hosting.Java` (preview) | 13.6.5-preview.1 |
+| `java` | or `Aspire.Hosting.Java` (preview) | 13.6.5-preview.1.26559.7 |
 | `javascript` | `Aspire.Hosting.JavaScript` | 13.6.5 |
 
 ```bash

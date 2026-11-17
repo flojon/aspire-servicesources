@@ -79,7 +79,7 @@ public class GuestLanguageFloorTargetsTests
     [InlineData("13.5.4", true)]
     [InlineData("13.6.0", true)]
     [InlineData("13.6.5-preview.1.26559.6", true)]   // the build just before the floor
-    [InlineData("13.6.5-preview.1.9", true)]         // 9 < 26506 numerically, not as text
+    [InlineData("13.6.5-preview.1.9", true)]         // 9 < 26559 numerically, not as text
     [InlineData("13.6.5-preview.1.26559.7", false)]  // exactly the floor
     [InlineData("13.6.5-preview.1.26559.10", false)]
     [InlineData("13.6.5-preview.2.1.1", false)]
