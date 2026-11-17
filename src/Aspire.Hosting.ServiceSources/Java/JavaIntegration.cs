@@ -182,7 +182,7 @@ internal sealed class OfficialJavaIntegration : JavaIntegration
     internal const string AssemblyName = "Aspire.Hosting.Java";
 
     /// <summary>The version core compiles against; an older one fails to bind.</summary>
-    internal const string MinimumVersion = "13.6.1-preview.1.26506.6";
+    internal const string MinimumVersion = "13.6.5-preview.1.26559.7";
 
     public override string PackageId => AssemblyName;
 

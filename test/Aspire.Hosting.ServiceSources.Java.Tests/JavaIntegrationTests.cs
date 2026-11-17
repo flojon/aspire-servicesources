@@ -44,26 +44,26 @@ public class JavaIntegrationTests
         Assert.IsType<CommunityToolkitJavaIntegration>(JavaIntegration.Choose(() => null, () => null));
 
     [Theory]
-    [InlineData("13.6.1-preview.1.26506.5", true)]
-    [InlineData("13.6.1-preview.1.26506.6", false)]
-    [InlineData("13.6.1-preview.1.26506.6+abcdef", false)]
-    [InlineData("13.6.1-preview.1.26506.10", false)]
-    [InlineData("13.6.1-preview.2.1.1", false)]
-    [InlineData("13.6.1-preview.1.9", true)]
-    [InlineData("13.6.1", false)]
+    [InlineData("13.6.5-preview.1.26559.6", true)]
+    [InlineData("13.6.5-preview.1.26559.7", false)]
+    [InlineData("13.6.5-preview.1.26559.7+abcdef", false)]
+    [InlineData("13.6.5-preview.1.26559.10", false)]
+    [InlineData("13.6.5-preview.2.1.1", false)]
+    [InlineData("13.6.5-preview.1.9", true)]
+    [InlineData("13.6.5", false)]
     [InlineData("13.6.0", true)]
     [InlineData("13.6.0-preview.9.99999.9", true)]
     [InlineData("13.7.0-preview.1.1.1", false)]
     [InlineData("not a version", false)]
-    [InlineData("13.6.1.0-preview.1.26506.6", false)]   // a fourth component of zero is the same version
+    [InlineData("13.6.5.0-preview.1.26559.7", false)]   // a fourth component of zero is the same version
     [InlineData("13.6.0.0", true)]
-    [InlineData("13.6.1-dev", false)]                    // a label never seen before is not evidence of age
-    [InlineData("13.6.1-rc.1", false)]
-    [InlineData("13.6.1-preview.1.99999999999999999999999.1", false)]   // longer than a long
-    [InlineData("13.6.1-preview.+1.26506.6", false)]
-    [InlineData("13.6.1-preview.1.0026506.5", true)]     // leading zeros do not change the number
+    [InlineData("13.6.5-dev", false)]                    // a label never seen before is not evidence of age
+    [InlineData("13.6.5-rc.1", false)]
+    [InlineData("13.6.5-preview.1.99999999999999999999999.1", false)]   // longer than a long
+    [InlineData("13.6.5-preview.+1.26559.7", false)]
+    [InlineData("13.6.5-preview.1.0026559.6", true)]     // leading zeros do not change the number
     public void IsOlder_ComparesLikeNuGet(string installed, bool expected) =>
-        Assert.Equal(expected, PackageVersionComparison.IsOlder(installed, "13.6.1-preview.1.26506.6"));
+        Assert.Equal(expected, PackageVersionComparison.IsOlder(installed, "13.6.5-preview.1.26559.7"));
 
     /// <summary>
     /// A kind that reports a configuration problem from <c>ResourceType</c> - the official package

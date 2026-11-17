@@ -78,15 +78,15 @@ public class GuestLanguageFloorTargetsTests
     [Theory]
     [InlineData("13.5.4", true)]
     [InlineData("13.6.0", true)]
-    [InlineData("13.6.1-preview.1.26506.5", true)]   // the build just before the floor
-    [InlineData("13.6.1-preview.1.9", true)]         // 9 < 26506 numerically, not as text
-    [InlineData("13.6.1-preview.1.26506.6", false)]  // exactly the floor
-    [InlineData("13.6.1-preview.1.26506.10", false)]
-    [InlineData("13.6.1-preview.2.1.1", false)]
-    [InlineData("13.6.1", false)]
-    [InlineData("13.6.2-preview.1.1.1", false)]
-    [InlineData("13.6.1-preview.1", true)]           // a single number is still below 1.26506.6
-    [InlineData("13.6.1-dev", false)]                // a label this gate cannot order is left to run time
+    [InlineData("13.6.5-preview.1.26559.6", true)]   // the build just before the floor
+    [InlineData("13.6.5-preview.1.9", true)]         // 9 < 26506 numerically, not as text
+    [InlineData("13.6.5-preview.1.26559.7", false)]  // exactly the floor
+    [InlineData("13.6.5-preview.1.26559.10", false)]
+    [InlineData("13.6.5-preview.2.1.1", false)]
+    [InlineData("13.6.5", false)]
+    [InlineData("13.6.6-preview.1.1.1", false)]
+    [InlineData("13.6.5-preview.1", true)]           // a single number is still below 1.26559.7
+    [InlineData("13.6.5-dev", false)]                // a label this gate cannot order is left to run time
     public async Task TheOfficialJavaFloorGate_AcceptsAPreviewNotOlderThanTheFloor(string resolved, bool shouldReject)
     {
         var (exitCode, output) = await RunProbeAsync("Aspire.Hosting.Java", resolved);
