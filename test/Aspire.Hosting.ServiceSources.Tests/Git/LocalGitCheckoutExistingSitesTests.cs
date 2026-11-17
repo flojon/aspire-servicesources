@@ -133,6 +133,21 @@ public class LocalGitCheckoutExistingSitesTests
     }
 
     [Fact]
+    public void Reconcile_DeepCheckoutWithGitFile_LogsNoNotice()
+    {
+        var temp = TempDirectories.CreateSubdirectory().FullName;
+        var layout = new CloneLayoutOptions(Path.Combine(temp, "gitroot"), IsWindows: true);
+        var environment = new LocalGitCheckoutSeparateTests.Environment(Path.Combine(temp, new string('a', 200)), layout.GitRoot!, layout);
+        Directory.CreateDirectory(environment.Checkout);
+        File.WriteAllText(Path.Combine(environment.Checkout, ".git"), "gitdir: elsewhere");
+        var notices = new List<string>();
+
+        Reconcile(environment, new ScriptedCloneGitClient(), notices);
+
+        Assert.Empty(notices);
+    }
+
+    [Fact]
     public void Reconcile_InPlaceCheckoutThatFits_LogsNothing()
     {
         var environment = NewEnvironment(separate: false);

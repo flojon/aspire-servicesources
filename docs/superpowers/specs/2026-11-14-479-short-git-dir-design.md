@@ -22,7 +22,8 @@ a throwaway one-commit repository cloned with `--dissociate --reference-if-able`
 > 2.52.0.windows.1 only, and this spec does not claim other versions behave the same; the decision seam
 > (`CloneLayoutOptions.GitDirLimit`) is injectable for that reason. The model is now "in place iff the
 > longer of the final and staging roots is at most 215", and every number that followed from 259 and 85
-> has been re-derived (174 to 215, the AppHost depth 129 to 169, the git root budget 149 to 190).
+> has been re-derived (174 to 215, the AppHost depth 129 to 170, the git root budget 149 to 190). An earlier
+> revision of this correction counted the staging suffix as 46 and gave 169 and 189; it is 45 (16 + 10 + 19), so 170 and 190.
 
 ## 1. Problem and what the code does today
 
@@ -73,8 +74,8 @@ ticket lists and corrects three claims it makes about the code:
   behaviour this package does not control.
 
 So the feature raises the longest usable staging root from 215 to 235 characters. That is an AppHost
-directory of 189 characters for a checkout name of 18 characters or fewer (`235 - 27 - 19`, where 27 is
-`\.servicesources\checkouts` and 19 is `\.incoming-<8 hex>`), against 169 without it (`215 - 46`); a longer checkout name makes the final path the
+directory of 190 characters for a checkout name of 18 characters or fewer (`235 - 26 - 19`, where 26 is
+`\.servicesources\checkouts` and 19 is `\.incoming-<8 hex>`), against 170 without it (`215 - 45`); a longer checkout name makes the final path the
 longer one and lowers it by the difference. A refusal remains beyond that (decision D1). The first
 failure at a root of 255 (`<root>\.git` reaching 260), so 235 leaves 19 characters of margin on purpose for tools that append path components.
 

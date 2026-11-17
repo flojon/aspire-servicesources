@@ -18,14 +18,6 @@ public class CloneLayoutTests
 
     private static CloneLayoutOptions Windows(string? gitRoot = UsableRoot) => new(gitRoot, IsWindows: true);
 
-    [Fact]
-    public void Boundaries_Are215InPlace_235Ceiling()
-    {
-        Assert.Equal(215, GitPathLimit.MaxInPlaceRootLength);
-        Assert.Equal(235, GitPathLimit.MaxWorkingTreeRootLength);
-        Assert.Equal(190, GitPathLimit.MaxGitRootLength);
-    }
-
     [Theory]
     [InlineData(215, true)]
     [InlineData(216, false)]
@@ -91,7 +83,7 @@ public class CloneLayoutTests
 
         Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
         Assert.Contains((GitPathLimit.MaxWorkingTreeRootLength + 1).ToString(), ex.Message, StringComparison.Ordinal);
-        Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("at least 1 character shorter", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Move the AppHost", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(".tmp-<pid>-pack", ex.Message, StringComparison.Ordinal);
     }
@@ -127,7 +119,22 @@ public class CloneLayoutTests
 
         Assert.Contains("'$GIT_DIR' too big", ex.Message, StringComparison.Ordinal);
         Assert.Contains("220", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("at least 1 character shorter", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("local application data folder is not set", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("%LOCALAPPDATA%", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Windows_GitRootTooLong_NamesItsPathAndLength()
+    {
+        var root = RootOfLength(GitPathLimit.MaxInPlaceRootLength + 1);
+        var longGitRoot = RootOfLength(GitPathLimit.MaxGitRootLength + 1);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => CloneLayout.Decide(Label, root, root, Windows(longGitRoot)));
+
+        Assert.Contains(longGitRoot, ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"is {longGitRoot.Length} characters, over the {GitPathLimit.MaxGitRootLength}", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

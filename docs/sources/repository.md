@@ -847,7 +847,7 @@ exception is a group-level `"source": "path"` entry, which supplies the director
 A managed checkout is cloned without `--recurse-submodules`, so a repository's submodules are not
 initialised: their folders are empty. Clone each submodule on its own instead, as a service of its
 own repository. Each gets its own checkout, its own path, and its own [path-length
-budget](../troubleshooting.md), which also keeps a deeply nested submodule from pushing the parent's
+budget](../troubleshooting.md#long-paths-on-windows), which also keeps a deeply nested submodule from pushing the parent's
 checkout over the Windows path limits.
 
 ## Working in git worktrees

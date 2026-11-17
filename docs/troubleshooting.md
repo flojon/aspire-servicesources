@@ -38,7 +38,7 @@ built and cannot be configured. It was measured on git 2.52.0.windows.1 only; ot
 to behave the same. For a checkout the git directory is the checkout path plus 5 characters (`\.git`), so a
 checkout path of 215 characters or fewer works in place and 216 or more does not.
 
-When the AppHost directory is deep enough that it would not fit (more than 169 characters),
+When the AppHost directory is deep enough that it would not fit (more than 170 characters),
 the clone is made with `git clone --separate-git-dir`. The working tree stays at
 `<AppHost>\.servicesources\checkouts\<name>`, and its `.git` is a file that points at a short git
 directory under `%LOCALAPPDATA%\ServiceSources\git`. Plain `git` and your IDE work in the checkout
@@ -59,7 +59,7 @@ Even with the git directory elsewhere, git for Windows cannot find a repository 
 passes 259 characters, so a working tree's own directory path is limited to 254 characters at the very
 most. The limit used here is 235, which leaves a margin (the clone is staged under `.incoming-<8 hex>`, a 19-character
 segment including the backslash, so for a checkout name of up to 18 characters the staging path is
-the one that counts). For such a name that is an AppHost directory of 189 characters. Beyond it the error
+the one that counts). For such a name that is an AppHost directory of 190 characters. Beyond it the error
 names the length and how many characters to remove; move the AppHost, or the worktree it is in, to a
 shorter path. If `%LOCALAPPDATA%` is unavailable or its `ServiceSources\git` folder would itself be
 too long, a deep AppHost is refused with the `'$GIT_DIR' too big` wording instead (it needs a path of
@@ -71,7 +71,7 @@ An existing checkout is never moved. If its git directory is still inside it and
 for git (a checkout path past 215 characters), a start logs a notice: every git command in it fails
 with `'$GIT_DIR' too big`.
 If it has local changes or unpushed commits, move `.servicesources\checkouts\<name>` out of the AppHost; otherwise delete it.
-Then re-run, and it is cloned again with a short git directory (this needs an AppHost path within the limit above, 189 characters for a checkout name of 18 characters or fewer).
+Then re-run, and it is cloned again with a short git directory (this needs an AppHost path within the limit above, 190 characters for a checkout name of 18 characters or fewer).
 
 ## Getting the full exception detail
 

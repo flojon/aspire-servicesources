@@ -34,7 +34,8 @@ internal sealed class ScratchDirectory : IDisposable
     /// </summary>
     private static readonly TimeSpan UnmarkedAbandonedAge = TimeSpan.FromHours(24);
 
-    private const string Prefix = ".incoming-";
+    internal const string Prefix = ".incoming-";
+    internal const int IdLength = 8;
     private const string LockSuffix = ".lock";
 
     private readonly string _checkoutsRoot;
@@ -65,7 +66,7 @@ internal sealed class ScratchDirectory : IDisposable
     /// <param name="nextId">Source of the 8-character name suffix; replaceable to force collisions.</param>
     public static ScratchDirectory Create(string checkoutsRoot, Func<string>? nextId = null)
     {
-        nextId ??= () => Guid.NewGuid().ToString("N")[..8];
+        nextId ??= () => Guid.NewGuid().ToString("N")[..IdLength];
 
         // Creating the lock with CreateNew is the atomic claim, so two clones can never pick one name.
         while (true)

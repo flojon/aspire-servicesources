@@ -63,7 +63,7 @@ never existed. Check the tag of the last release before adding one.
   git fails every command with `'$GIT_DIR' too big` once the checkout path passes 215 characters (a
   limit compiled into git, measured on git 2.52.0.windows.1 only; [#474] had modelled it as a
   pack-file path and refused AppHost directories past about 129 characters). Now AppHost
-  directories up to 169 characters clone in place, and up to 189 characters clone with `git clone --separate-git-dir`, leaving
+  directories up to 170 characters clone in place, and up to 190 characters clone with `git clone --separate-git-dir`, leaving
   the working tree where it was and a `.git` file pointing at the short git directory. Beyond that
   ceiling the clone is still refused, with a message about the working-tree path. A working checkout is never moved, so a shallower AppHost clones as before; a git
   directory nothing refers to any more is deleted by the next deep clone once it has gone 14 days
