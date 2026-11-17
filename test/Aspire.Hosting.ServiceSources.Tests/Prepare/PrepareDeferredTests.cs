@@ -1612,6 +1612,16 @@ public class PrepareDeferredTests
     }
 
     [Fact]
+    public async Task ExplicitEager_NonDeferrableKind_WarmChangedCommand_DoesNotAdviseRemovingEager()
+    {
+        var attempt = await ResolveWarmAsync(CheckoutTiming.Eager, ChangedMetadata, supportsDeferred: false);
+
+        var error = Assert.IsType<ServiceSourcesConfigurationException>(attempt.Error);
+        Assert.Contains(attempt.MarkerPath, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetCheckoutTiming", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task KindResolveDeferredReturnsNull_WarmChangedCommand_Throws()
     {
         var attempt = await ResolveWarmAsync(timing: null, ChangedMetadata, resolveDeferredReturnsNull: true);

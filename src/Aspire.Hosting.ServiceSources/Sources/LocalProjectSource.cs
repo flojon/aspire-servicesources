@@ -162,7 +162,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             throw DeferredCheckout.BlockedChangedCommand(
                 serviceName, definition, prepare.Step, builder.AppHostDirectory,
-                canDefer: !deferralDeclined);
+                // Dropping Eager only helps a kind that would then defer.
+                canDefer: !deferralDeclined && (isDotnetKind || SupportsDeferredKind(serviceName, definition, handler!)));
         }
 
         // Blocks on this service's checkout. Usually that checkout was started on the first
