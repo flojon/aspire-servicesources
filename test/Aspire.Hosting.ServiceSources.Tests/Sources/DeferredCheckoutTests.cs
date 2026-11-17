@@ -52,7 +52,7 @@ public class DeferredCheckoutTests
         public void ReportProgress(string repositoryUrl, params string[] lines) =>
             _progressLines[repositoryUrl] = lines;
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
             lock (Cloned)
             {

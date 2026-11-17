@@ -32,7 +32,7 @@ public class PrepareEagerPathTests
     {
         public string? HeadCommitSha { get; set; } = "1111111111111111111111111111111111111111";
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
             Directory.CreateDirectory(destinationPath);
             File.WriteAllText(Path.Combine(destinationPath, "prepare.sh"), "#!/bin/sh\n");

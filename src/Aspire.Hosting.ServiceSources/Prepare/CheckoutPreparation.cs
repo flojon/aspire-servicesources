@@ -192,7 +192,7 @@ internal static class CheckoutPreparation
         // The commit is recorded even under `once`, which never compares it: it costs a field, and
         // it means a developer who later switches the mode to `oncePerCommit` is matched against the
         // commit the step really ran on rather than forced through one re-run to find out.
-        if (step.Mode != PrepareMode.Always)
+        if (step.Mode != PrepareMode.Always && markerPath is not null)
         {
             PrepareMarker.Write(
                 markerPath,
@@ -247,7 +247,7 @@ internal static class CheckoutPreparation
     /// </param>
     /// <param name="Commit">The commit the step would run against, where that is knowable.</param>
     private readonly record struct Decision(
-        Raw? Reason, bool CommandChanged, string MarkerPath, string? CheckoutPath, string? Commit);
+        Raw? Reason, bool CommandChanged, string? MarkerPath, string? CheckoutPath, string? Commit);
 
     private static Decision Decide(
         string serviceName,
@@ -291,7 +291,7 @@ internal static class CheckoutPreparation
     /// about this start rather than a warning bolted onto a mode choice.
     /// </remarks>
     private static Raw? ReasonToRun(
-        PrepareStep step, string markerPath, string? commit, string? checkoutPath, out bool commandChanged)
+        PrepareStep step, string? markerPath, string? commit, string? checkoutPath, out bool commandChanged)
     {
         commandChanged = false;
 
@@ -309,7 +309,7 @@ internal static class CheckoutPreparation
             return Raw.Literal("its prepare step runs on every start (mode: always).");
         }
 
-        if (PrepareMarker.Read(markerPath) is not { } marker)
+        if (markerPath is null || PrepareMarker.Read(markerPath) is not { } marker)
         {
             return Raw.Literal("no completed prepare step is recorded for this checkout.");
         }

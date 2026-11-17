@@ -129,7 +129,8 @@ internal sealed partial class GitCliClient(
         }
     }
 
-    public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+    public void Clone(
+        string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
     {
         // git prints progress only when stderr is a terminal, and the stderr of a process we
         // redirect never is, so --progress is what asks for it at all. Passed only when someone is
@@ -141,20 +142,25 @@ internal sealed partial class GitCliClient(
         // rather than as an option.
         // The -c after "clone" is the one written into the clone's own config; the global one is not.
         RunRemoteCommand(
-            ["clone", .. PlatformOptions(), .. progressOption, "--", repositoryUrl, destinationPath],
+            ["clone", .. PlatformOptions(), .. SeparateGitDirOption(separateGitDir), .. progressOption, "--", repositoryUrl, destinationPath],
             GitUrl.Parse(repositoryUrl).Host,
             progress);
     }
 
+    // One argument, so a path with spaces or a leading '-' can never be read as anything else.
+    private static string[] SeparateGitDirOption(string? separateGitDir) =>
+        separateGitDir is null ? [] : [$"--separate-git-dir={separateGitDir}"];
+
     public void CloneWithReference(
-        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null)
+        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null,
+        string? separateGitDir = null)
     {
         string[] progressOption = progress is null ? [] : ["--progress"];
 
         // --reference-if-able: a reference that vanished since it was chosen clones normally instead of failing.
         // --dissociate: copies borrowed objects in, so a gc or deletion of the reference cannot corrupt this clone.
         RunRemoteCommand(
-            ["clone", .. PlatformOptions(), .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
+            ["clone", .. PlatformOptions(), .. SeparateGitDirOption(separateGitDir), .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
                 "--", repositoryUrl, destinationPath],
             GitUrl.Parse(repositoryUrl).Host,
             progress,

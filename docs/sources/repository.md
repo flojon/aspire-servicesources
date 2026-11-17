@@ -74,9 +74,13 @@ the `"path"` spelling to paste instead.)
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
-  `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
-  than replaced; point at it with the [`"path"` source](path.md) instead. A directory there with no
+  overwriting your work. On Windows, an AppHost directory too deep for git to keep its git directory in the checkout gets a clone
+  whose `.git` is a file pointing at a short git directory under `%LOCALAPPDATA%\ServiceSources\git`
+  (see [Troubleshooting](../troubleshooting.md#long-paths-on-windows)); a `.git` file this tool wrote
+  itself is recognised. Anything else you put at that path yourself that isn't a plain clone — a
+  linked `git worktree`, a clone made with `--separate-git-dir` elsewhere, or a checkout moved or
+  renamed together with its AppHost — is refused with the specific reason rather than replaced;
+  point at it with the [`"path"` source](path.md) instead. A directory there with no
   `.git` entry at all is treated as debris from an interrupted clone and **deleted**, so don't
   hand-place a plain directory as a quick override — use `"path"` for that too. The `.servicesources/` directory gitignores itself
   on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
@@ -837,6 +841,14 @@ exception is a group-level `"source": "path"` entry, which supplies the director
 `"path"` service that sets none — neither a developer `path.path` nor a catalog `path:`. A catalog
 `path:` is the author's own layout, so a member on `"path"` that declares one keeps it; only a developer's
 `path.path` (or `repository.path`) beats the group.
+
+## Submodules
+
+A managed checkout is cloned without `--recurse-submodules`, so a repository's submodules are not
+initialised: their folders are empty. Clone each submodule on its own instead, as a service of its
+own repository. Each gets its own checkout, its own path, and its own [path-length
+budget](../troubleshooting.md#long-paths-on-windows), which also keeps a deeply nested submodule from pushing the parent's
+checkout over the Windows path limits.
 
 ## Working in git worktrees
 

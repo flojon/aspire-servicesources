@@ -58,6 +58,19 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **A managed clone on Windows whose AppHost directory is too deep for git to keep its git
+  directory in place now keeps its git directory in a short one under `%LOCALAPPDATA%\ServiceSources\git`** ([#479]).
+  git fails every command with `'$GIT_DIR' too big` once the checkout path passes 215 characters (a
+  limit compiled into git, measured on git 2.52.0.windows.1 only; [#474] had modelled it as a
+  pack-file path and refused AppHost directories past about 129 characters). Now AppHost
+  directories up to 170 characters clone in place, and up to 190 characters clone with `git clone --separate-git-dir`, leaving
+  the working tree where it was and a `.git` file pointing at the short git directory. Beyond that
+  ceiling the clone is still refused, with a message about the working-tree path. A working checkout is never moved, so a shallower AppHost clones as before; a git
+  directory nothing refers to any more is deleted by the next deep clone once it has gone 14 days
+  unused; an existing deep in-place checkout
+  gets a notice to delete it and re-run. See
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
+
 - **A health check on a `"kubernetes"` service now applies instead of being skipped** ([#399]).
   `WithHttpHealthCheck` and `WithHealthCheck` reach the port-forward's resource, so `WaitFor(service)`
   also waits for the author's check. `"url"`, `"disabled"` and unconfigured
@@ -2196,3 +2209,4 @@ Targets `net10.0`.
 [#490]: https://github.com/flojon/aspire-servicesources/issues/490
 [#486]: https://github.com/flojon/aspire-servicesources/issues/486
 [#499]: https://github.com/flojon/aspire-servicesources/issues/499
+[#479]: https://github.com/flojon/aspire-servicesources/issues/479

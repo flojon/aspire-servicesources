@@ -52,7 +52,7 @@ public class LocalCheckoutPrefetchTests
         public ManualResetEventSlim BlockReconciliation() =>
             _blockReconciliation = new ManualResetEventSlim(false);
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
         {
             lock (Cloned)
             {
