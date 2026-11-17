@@ -8,6 +8,10 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 [Trait("Timing", "true")]
 public class UrlContainerDryRunTimeoutTests
 {
+    // The timeout also bounds scheduling a trivial callback onto the pool, which stalls past a short
+    // limit while the suite runs in parallel; only the hung callbacks should ever reach it.
+    private static readonly TimeSpan DryRunTimeout = TimeSpan.FromSeconds(2);
+
     private static (IDistributedApplicationBuilder Builder, IResourceBuilder<ServiceResource> Inventory) Arrange()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
@@ -109,5 +113,5 @@ public class UrlContainerDryRunTimeoutTests
         IDistributedApplicationBuilder builder, ContainerResource consumer, ServiceResource[] facades) =>
         Aspire.Hosting.ServiceSources.Sources.UrlContainerReferenceRewrite.ApplyAsync(
             consumer, facades, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            builder.Services.BuildServiceProvider(), TimeSpan.FromMilliseconds(200));
+            builder.Services.BuildServiceProvider(), DryRunTimeout);
 }
