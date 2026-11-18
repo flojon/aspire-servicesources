@@ -762,25 +762,38 @@ public class GroupPathSourceTests
         Assert.Single(second.Runs);
     }
 
-    [Fact]
-    public void RedirectedMembers_OutsideRunMode_EachReportsItsOwnSkippedStep()
+    // The skip notice goes straight to Console.Out, so capturing it swaps process-wide state:
+    // this collection runs alone, never beside another test that writes to the console.
+    [Collection(ConsoleOutputCollection.Name)]
+    [Trait("IO", "true")]
+    public class SkippedStepNotice
     {
-        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev-publish-notice"] };
-        var captured = new StringWriter();
-        var original = Console.Out;
-        Console.SetOut(captured);
-
-        DirectoryRecordingRunner runner;
-        try
+        [Fact]
+        public void RedirectedMembers_OutsideRunMode_EachReportsItsOwnSkippedStep()
         {
-            runner = ResolveTwoRedirectedMembers(prepare, prepare, out _, publish: true);
-        }
-        finally
-        {
-            Console.SetOut(original);
-        }
+            var prepare = new PrepareDeveloperConfig { Command = ["make", "dev-publish-notice"] };
+            var captured = new StringWriter();
+            var original = Console.Out;
+            Console.SetOut(captured);
 
-        Assert.Empty(runner.Runs);
-        Assert.Equal(2, captured.ToString().Split("Not running the prepare step 'make dev-publish-notice'").Length - 1);
+            DirectoryRecordingRunner runner;
+            try
+            {
+                runner = ResolveTwoRedirectedMembers(prepare, prepare, out _, publish: true);
+            }
+            finally
+            {
+                Console.SetOut(original);
+            }
+
+            Assert.Empty(runner.Runs);
+            Assert.Equal(2, captured.ToString().Split("Not running the prepare step 'make dev-publish-notice'").Length - 1);
+        }
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ConsoleOutputCollection
+{
+    public const string Name = "Console output";
 }

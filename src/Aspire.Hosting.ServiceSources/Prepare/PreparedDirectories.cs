@@ -12,6 +12,11 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// and the same mode: a member asking for <c>always</c> next to one asking for <c>once</c> wants
 /// different things, so both run. Per builder and in memory only — a later start decides from each
 /// service's own marker, as before.
+/// <para>
+/// Check-then-mark is atomic only per directory: callers hold <see cref="Sources.CheckoutNameLock"/>
+/// for the directory across <see cref="IsSettled"/> and <see cref="MarkSettled"/>.
+/// Different directories hold different locks, hence the concurrent set.
+/// </para>
 /// </remarks>
 internal sealed class PreparedDirectories
 {
@@ -22,11 +27,6 @@ internal sealed class PreparedDirectories
     public static PreparedDirectories For(IDistributedApplicationBuilder builder) =>
         Cache.GetValue(builder, static _ => new PreparedDirectories());
 
-    /// <remarks>
-    /// Check-then-mark is atomic only per directory: callers hold <see cref="Sources.CheckoutNameLock"/>
-    /// for <paramref name="directory"/> across <see cref="IsSettled"/> and <see cref="MarkSettled"/>.
-    /// Different directories hold different locks, hence the concurrent set.
-    /// </remarks>
     public bool IsSettled(string directory, PrepareStep step) =>
         _settled.ContainsKey((directory, step.CommandHash, step.Mode));
 
