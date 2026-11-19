@@ -843,4 +843,43 @@ public class PathSourceTests
         Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
         Assert.IsType<ServiceResource>(service.Resource);
     }
+
+    [Fact]
+    public void Resolve_TwoServicesOnOneDirectoryWithTheSamePrepare_RunItOnce()
+    {
+        var shared = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(shared, "Orders.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(shared, "Basket.csproj"), "<Project />");
+        var runner = new DelegatePrepareRunnerRecordingCommands();
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var source = new PathSource(new GitCliClient(), runner);
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"] };
+
+        source.Resolve(builder, ServiceName, Definition(path: "services/orders"), DevConfig(path: shared, preparePath: prepare));
+        source.Resolve(
+            builder, "basket", Definition(path: "services/basket", project: "Basket.csproj", serviceName: "basket"),
+            DevConfig(path: shared, preparePath: new PrepareDeveloperConfig { Command = ["make", "dev"] }));
+
+        Assert.Equal(["make", "dev"], Assert.Single(runner.Commands));
+    }
+
+    [Fact]
+    public void Resolve_TwoServicesWithTheSamePrepareInDifferentDirectories_RunItInEach()
+    {
+        var first = TempDirectories.CreateSubdirectory().FullName;
+        var second = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(first, "Orders.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(second, "Basket.csproj"), "<Project />");
+        var runner = new DelegatePrepareRunnerRecordingCommands();
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var source = new PathSource(new GitCliClient(), runner);
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"] };
+
+        source.Resolve(builder, ServiceName, Definition(path: "services/orders"), DevConfig(path: first, preparePath: prepare));
+        source.Resolve(
+            builder, "basket", Definition(path: "services/basket", project: "Basket.csproj", serviceName: "basket"),
+            DevConfig(path: second, preparePath: prepare));
+
+        Assert.Equal(2, runner.Commands.Count);
+    }
 }

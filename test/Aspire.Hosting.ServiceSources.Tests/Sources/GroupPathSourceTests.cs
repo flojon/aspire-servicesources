@@ -681,4 +681,119 @@ public class GroupPathSourceTests
 
         Assert.Empty(runner.Runs);
     }
+
+    // === prepare: identical steps on one resolved directory run once ===
+
+    private static DirectoryRecordingRunner ResolveTwoRedirectedMembers(
+        PrepareDeveloperConfig? ordersPrepare, PrepareDeveloperConfig? basketPrepare, out string groupDir,
+        string? sharedDirectory = null, bool publish = false)
+    {
+        groupDir = sharedDirectory ?? ProjectTree("Orders", "Basket");
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var builder = publish ? TestHelpers.CreatePublishingBuilder(appHostDirectory) : TestHelpers.CreateBuilder(appHostDirectory);
+        var runner = new DirectoryRecordingRunner();
+        var group = PathGroup();
+        group.Path!.Path = groupDir;
+        var source = new PathSource(prepareRunner: runner);
+
+        source.Resolve(
+            builder, "orders", Grouped(),
+            new ServiceDeveloperConfig { Source = "repository", Path = new() { Prepare = ordersPrepare } }, group);
+        source.Resolve(
+            builder, "basket",
+            new ServiceDefinition
+            {
+                Repository = Grouped().Repository, Project = "src/Basket/Basket.csproj",
+                Kind = LocalKinds.Dotnet, Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+            },
+            new ServiceDeveloperConfig { Source = "repository", Path = new() { Prepare = basketPrepare } }, group);
+
+        return runner;
+    }
+
+    [Fact]
+    public void RedirectedMembers_WithTheSamePrepareCommandInOneDirectory_RunItOnce()
+    {
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"] };
+
+        var runner = ResolveTwoRedirectedMembers(prepare, new PrepareDeveloperConfig { Command = ["make", "dev"] }, out _);
+
+        Assert.Single(runner.Runs);
+    }
+
+    [Fact]
+    public void RedirectedMembers_WithDifferentPrepareCommands_RunEach()
+    {
+        var runner = ResolveTwoRedirectedMembers(
+            new PrepareDeveloperConfig { Command = ["make", "dev"] },
+            new PrepareDeveloperConfig { Command = ["make", "other"] }, out _);
+
+        Assert.Equal(2, runner.Runs.Count);
+    }
+
+    [Fact]
+    public void RedirectedMembers_WithTheSameCommandButDifferentModes_RunEach()
+    {
+        var runner = ResolveTwoRedirectedMembers(
+            new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "once" },
+            new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "always" }, out _);
+
+        Assert.Equal(2, runner.Runs.Count);
+    }
+
+    [Fact]
+    public void RedirectedMembers_OnlyOneDeclaresAPrepare_RunsThatOneOnce()
+    {
+        var runner = ResolveTwoRedirectedMembers(
+            null, new PrepareDeveloperConfig { Command = ["make", "dev"] }, out _);
+
+        Assert.Single(runner.Runs);
+    }
+
+    [Fact]
+    public void SeparateComposition_RunsTheSameStepAgain_BecauseDedupeIsPerComposition()
+    {
+        var prepare = new PrepareDeveloperConfig { Command = ["make", "dev"], Mode = "always" };
+
+        var first = ResolveTwoRedirectedMembers(prepare, prepare, out var shared);
+        var second = ResolveTwoRedirectedMembers(prepare, prepare, out _, shared);
+
+        Assert.Single(first.Runs);
+        Assert.Single(second.Runs);
+    }
+
+    // The skip notice goes straight to Console.Out, so capturing it swaps process-wide state:
+    // this collection runs alone, never beside another test that writes to the console.
+    [Collection(ConsoleOutputCollection.Name)]
+    [Trait("IO", "true")]
+    public class SkippedStepNotice
+    {
+        [Fact]
+        public void RedirectedMembers_OutsideRunMode_EachReportsItsOwnSkippedStep()
+        {
+            var prepare = new PrepareDeveloperConfig { Command = ["make", "dev-publish-notice"] };
+            var captured = new StringWriter();
+            var original = Console.Out;
+            Console.SetOut(captured);
+
+            DirectoryRecordingRunner runner;
+            try
+            {
+                runner = ResolveTwoRedirectedMembers(prepare, prepare, out _, publish: true);
+            }
+            finally
+            {
+                Console.SetOut(original);
+            }
+
+            Assert.Empty(runner.Runs);
+            Assert.Equal(2, captured.ToString().Split("Not running the prepare step 'make dev-publish-notice'").Length - 1);
+        }
+    }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ConsoleOutputCollection
+{
+    public const string Name = "Console output";
 }
