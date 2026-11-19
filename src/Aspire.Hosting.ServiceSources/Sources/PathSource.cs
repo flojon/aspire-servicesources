@@ -36,7 +36,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </remarks>
 internal sealed class PathSource(
     IGitClient? gitClient = null, IPrepareCommandRunner? prepareRunner = null, IBuildRunner? buildRunner = null)
-    : IServiceSource
+    : ServiceSource<string?>, IServiceSource
 {
     private readonly IGitClient _gitClient = gitClient ?? new GitCliClient();
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
@@ -44,10 +44,39 @@ internal sealed class PathSource(
 
     private const string Source = "path";
 
-    public IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
+    public override bool IsSwitchRemedy => false;
+
+    protected override IReadOnlyList<FollowUpField> FieldsFor(ServiceDefinition definition) =>
+        string.IsNullOrWhiteSpace(definition.Path)
+            ? [new("path:path", "Local directory", true, InputType.Text)]
+            : [];
+
+    /// <returns>The developer's own directory, resolved and known to exist, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// A catalog <c>path:</c>'s confinement and existence need the builder and stay in <see cref="Build"/>.
+    /// </remarks>
+    protected override string? Check(SourceInput input)
     {
+        if (GroupPathSource.Redirects(input.ServiceName, input.Definition, input.Config, input.RepositoryConfig))
+        {
+            return null;
+        }
+
+        if (input.Config.Path.Path is { } overridePath)
+        {
+            return ResolveOverride(input.ServiceName, overridePath, input.AppHostDirectory);
+        }
+
+        RequireCatalogPath(input.ServiceName, input.Definition);
+
+        return null;
+    }
+
+    protected override IResourceBuilder<ServiceResource> Build(
+        IDistributedApplicationBuilder builder, SourceInput input, string? checkedOverride)
+    {
+        var (serviceName, definition, config, _, repositoryConfig) = input;
+
         var isDotnetKind = string.Equals(definition.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
 
         // Settled ahead of any filesystem work, exactly as LocalProjectSource settles it ahead of a
@@ -64,7 +93,7 @@ internal sealed class PathSource(
 
         var repoRoot = groupRedirect
             ? GroupPathSource.ResolveDirectory(definition, repositoryConfig!, builder.AppHostDirectory)
-            : ResolveRepoRoot(builder, serviceName, definition, config, builder.AppHostDirectory);
+            : ResolveRepoRoot(builder, serviceName, definition, checkedOverride, builder.AppHostDirectory);
 
         RunPrepareIfDue(builder, serviceName, definition, config, repoRoot, developerDirectory: groupRedirect || config.Path.Path is not null);
 
@@ -142,14 +171,12 @@ internal sealed class PathSource(
     /// </remarks>
     private static string ResolveRepoRoot(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, string appHostDirectory)
+        string? checkedOverride, string appHostDirectory)
     {
-        if (config.Path.Path is { } overridePath)
+        if (checkedOverride is not null)
         {
-            return ResolveOverride(serviceName, overridePath, appHostDirectory);
+            return checkedOverride;
         }
-
-        RequireCatalogPath(serviceName, definition);
 
         ValidateCatalogPath(builder, serviceName, definition.Path!, appHostDirectory);
 
@@ -193,7 +220,7 @@ internal sealed class PathSource(
             $"Service '{new Name(serviceName)}' source is 'path' but {Raw.Origin(definition.Origin)} gives it no "
             + $"directory to use. Either give its catalog entry a 'path' (or WithPath(...) in code), or set "
             + $"'{serviceKey}:path:path' to a directory you already have on disk. "
-            + $"{LocalProjectSource.WhereTheSourceCanBeSet(serviceName)}");
+            + $"{LocalProjectSource.WhereTheSourceCanBeSet(serviceName)}").AsMissingSetting("path:path");
     }
 
     /// <summary>

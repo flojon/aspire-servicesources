@@ -165,6 +165,50 @@ public class UnconfiguredPromptTests
         Assert.Equal("8080", entry?["kubernetes"]?["port"]?.GetValue<string>());
     }
 
+    private sealed class RecordingWriter(string appHostDirectory) : IDeveloperConfigWriter
+    {
+        private readonly JsonFileDeveloperConfigWriter _inner = new(appHostDirectory);
+
+        public List<Func<JsonObject, string?>?> Callbacks { get; } = [];
+
+        public Task<SaveResult> SaveAsync(
+            string serviceName,
+            string source,
+            IReadOnlyDictionary<string, string> fields,
+            CancellationToken cancellationToken,
+            Func<JsonObject, string?>? validateMerged = null)
+        {
+            Callbacks.Add(validateMerged);
+            return _inner.SaveAsync(serviceName, source, fields, cancellationToken, validateMerged);
+        }
+    }
+
+    [Fact]
+    public async Task Save_ValidatesOnce_ThroughTheWritersCallback()
+    {
+        var interaction = Answering(["kubernetes"], (_, inputs) => Fill(inputs, "dev", "80"));
+        RecordingWriter? writer = null;
+
+        var (dir, _) = await RunAsync(interaction, [Orders()], writerFor: d => writer = new RecordingWriter(d));
+
+        // Nothing validated the bare answers before the save: the one callback is the whole validation.
+        Assert.NotNull(writer);
+        Assert.NotNull(Assert.Single(writer.Callbacks));
+        Assert.Equal("kubernetes", SavedEntry(dir, "orders")?["source"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Save_BadAnswer_ReportsOneFailure()
+    {
+        var interaction = Answering(["kubernetes"], (_, inputs) => Fill(inputs, " dev ", "80"));
+
+        var (dir, logger) = await RunAsync(interaction, [Orders()]);
+
+        Assert.Null(SavedEntry(dir, "orders"));
+        Assert.Single(interaction.Notifications, n => n.Options?.Intent == MessageIntent.Error);
+        Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning);
+    }
+
     [Fact]
     public async Task Run_ContainerAnswer_RaisesNoFollowUp()
     {

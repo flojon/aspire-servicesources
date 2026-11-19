@@ -1829,6 +1829,49 @@ public class LocalProjectSourceTests
     private static IDistributedApplicationBuilder PlainBuilder() =>
         TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
+    private sealed class FakeRemedySource(bool isSwitchRemedy) : IServiceSource
+    {
+        public bool IsSwitchRemedy => isSwitchRemedy;
+
+        public SourceRequirements Requirements(SourceInput input) => new([], null);
+
+        public IResourceBuilder<ServiceResource> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+            ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null) =>
+            throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void SourceSwitchRemedy_SkipsSourcesNotFlaggedAsSwitchRemedy()
+    {
+        var input = new SourceInput(ServiceName, RepositorylessDefinition(), DevConfig(), "apphost");
+
+        var remedy = LocalProjectSource.SourceSwitchRemedy(
+            Raw.Literal("ServiceSources:Services:orders"),
+            input,
+            name => new FakeRemedySource(isSwitchRemedy: name == "url")).ToString();
+
+        Assert.Contains("'url'", remedy);
+        Assert.DoesNotContain("'container'", remedy);
+        Assert.DoesNotContain("'kubernetes'", remedy);
+        Assert.DoesNotContain("'disabled'", remedy);
+    }
+
+    [Fact]
+    public void Requirements_ProblemMessage_EqualsWhatResolveThrows()
+    {
+        var source = new LocalProjectSource(new FakeGitClient());
+        var definition = RepositorylessDefinition();
+        var config = DevConfig();
+
+        var problem = source.Requirements(new SourceInput(ServiceName, definition, config, "apphost")).Problem;
+        var thrown = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            source.Resolve(PlainBuilder(), ServiceName, definition, config));
+
+        Assert.NotNull(problem);
+        Assert.Equal(thrown.Message, problem.Message);
+    }
+
     [Fact]
     public void Resolve_LocalOnEntryDeclaringOnlyUrl_ThrowsNamingTheServiceAndTheCatalogThatDeclaresIt()
     {
@@ -1995,126 +2038,6 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("' or 'url' or '", ex.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The query is part of the source contract: a source that does not override it is never offered,
-    /// so each registered source has to answer deliberately. Sources that cannot be a switch target
-    /// from a repositoryless local entry are named here; a new source kind fails this test until it
-    /// either implements <c>CanResolve</c> or is added to that list on purpose.
-    /// </summary>
-    [Fact]
-    public void EveryRegisteredSource_OverridesCanResolve_OrIsDeliberatelyNeverASwitchTarget()
-    {
-        string[] neverOffered = ["repository", "path", "disabled"];
-
-        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
-        {
-            if (neverOffered.Contains(name, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            Assert.True(
-                OverridesCanResolve(source),
-                $"Source '{name}' does not implement IServiceSource.CanResolve, so it would never be offered as a switch.");
-        }
-    }
-
-    /// <summary>
-    /// The layering the picker and the error-message switch offer both lean on: a source that would
-    /// resolve as things stand must also be one the picker offers for the entry. Each source states
-    /// the two questions separately, so nothing but this test stops them drifting apart.
-    /// </summary>
-    [Fact]
-    public void EverySourceThatCanResolve_IsAlsoOfferedFor()
-    {
-        var samples = new List<(string Label, ServiceMetadata Metadata)>();
-
-        foreach (var url in new[] { null, "", "  ", "https://orders.example.com", "ftp://orders.example.com", "not a url" })
-        {
-            samples.Add(($"url '{url}'", new ServiceMetadata { Url = new UrlMetadata { Url = url! } }));
-        }
-
-        foreach (var (image, port, scheme) in new (string?, int?, string?)[]
-        {
-            (null, null, null), ("", 8080, null), ("company/orders", null, null), ("company/orders", 0, null),
-            ("company/orders", 70000, null), ("company/orders", 8080, null), ("company/orders", 8080, "https"),
-            ("company/orders", 8080, "gopher"),
-        })
-        {
-            samples.Add(($"container {image}/{port}/{scheme}", new ServiceMetadata
-            {
-                Container = new ContainerMetadata { Image = image!, Port = port, Scheme = scheme },
-            }));
-        }
-
-        foreach (var (service, port, scheme) in new (string?, int?, string?)[]
-        {
-            (null, null, null), ("", 80, null), ("  ", 80, null), ("orders", null, null), ("orders", 0, null),
-            ("orders", 80, null), ("orders", 80, "https"), ("orders", 80, "gopher"),
-        })
-        {
-            samples.Add(($"kubernetes {service}/{port}/{scheme}", new ServiceMetadata
-            {
-                Kubernetes = new KubernetesMetadata { Service = service!, Port = port, Scheme = scheme },
-            }));
-        }
-
-        samples.Add(("empty", new ServiceMetadata()));
-
-        // A url set only in developer config makes UrlSource.CanResolve true for an entry whose
-        // catalog has none, so the config dimension has to vary the url as well as the context.
-        var configs = (from context in new[] { null, "", "dev-cluster" }
-                       from devUrl in new[] { null, "https://dev.example.com", "ftp://dev.example.com" }
-                       select (Context: $"{context}', developer url '{devUrl}", Config: ConfigWith(context, devUrl))).ToList();
-
-        static ServiceDeveloperConfig ConfigWith(string? context, string? devUrl)
-        {
-            var config = DevConfig();
-            config.Kubernetes.Context = context;
-            config.Url.Url = devUrl;
-            return config;
-        }
-
-        var checkedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var resolvable = 0;
-
-        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
-        {
-            if (!OverridesCanResolve(source))
-            {
-                continue;
-            }
-
-            checkedSources.Add(name);
-
-            foreach (var (label, metadata) in samples)
-            {
-                metadata.Repository = "";
-                metadata.Project = "Orders.csproj";
-                metadata.Kind = LocalKinds.Dotnet;
-                var definition = metadata.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
-
-                foreach (var (context, config) in configs)
-                {
-                    if (!source.CanResolve(definition, config))
-                    {
-                        continue;
-                    }
-
-                    resolvable++;
-                    Assert.True(
-                        source.IsOfferedFor(definition),
-                        $"Source '{name}' can resolve '{label}' (kubernetes context '{context}') " +
-                        "but does not offer itself for it.");
-                }
-            }
-        }
-
-        Assert.Contains("url", checkedSources);
-        Assert.Contains("container", checkedSources);
-        Assert.Contains("kubernetes", checkedSources);
-        Assert.True(resolvable >= 3, "The samples should include shapes each source can resolve.");
-    }
 
     /// <summary>
     /// A url set only in developer config, with none in the catalog, still makes <c>"url"</c> work
@@ -2434,21 +2357,5 @@ public class LocalProjectSourceTests
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
             builder.AddResource(new ResolvingKindResource(serviceName))
                 .WithHttpEndpoint(port: 5555, name: "http");
-    }
-
-    /// <summary>Whether the source implements <see cref="IServiceSource.CanResolve"/> itself, not through the default.</summary>
-    private static bool OverridesCanResolve(IServiceSource source)
-    {
-        var map = source.GetType().GetInterfaceMap(typeof(IServiceSource));
-        var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
-        return map.TargetMethods[index].DeclaringType == source.GetType();
-    }
-
-    [Fact]
-    public void SourceProbe_TreatsAnyException_AsNotResolvable()
-    {
-        Assert.True(SourceProbe.Resolves(() => { }));
-        Assert.False(SourceProbe.Resolves(() => throw ServiceSourcesConfigurationException.For($"bad entry")));
-        Assert.False(SourceProbe.Resolves(() => throw new UriFormatException("not a uri")));
     }
 }
