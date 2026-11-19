@@ -27,7 +27,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     // say this service has nothing to clone at all — and a cold clone is what the answer saves.
     protected override NoValues Check(SourceInput input)
     {
-        RequireRepositoryToCheckOut(input.ServiceName, input.Definition, input.Config);
+        RequireRepositoryToCheckOut(input);
 
         return default;
     }
@@ -336,7 +336,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// <para>
     /// The message names the remedies it can stand behind. A switch to <c>url</c>, <c>container</c>
     /// or <c>kubernetes</c> is offered only for a source whose own
-    /// <see cref="IServiceSource.CanResolve"/> says the entry would resolve under it as things
+    /// <see cref="SourceRequirements.Resolves"/> says the entry would resolve under it as things
     /// stand (see <see cref="SourceSwitchRemedy"/>); a declared block is not proof its preconditions
     /// hold, so a source that cannot resolve is left out. The other remedies are declaring a
     /// repository and the <c>"path"</c> source with a <c>path.path</c> override — the
@@ -344,9 +344,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// key is named in every layer that can set it.
     /// </para>
     /// </remarks>
-    private static void RequireRepositoryToCheckOut(
-        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    private static void RequireRepositoryToCheckOut(SourceInput input)
     {
+        var (serviceName, definition, config, _, _) = input;
+
         if (!LocalGitCheckout.IsManagedCheckout(config)
             || LocalGitCheckout.HasRepositoryToClone(definition))
         {
@@ -358,24 +359,26 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
             + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or {PathSourceRemedy(serviceKey, definition)} "
-            + $"{SourceSwitchRemedy(serviceKey, definition, config)}{WhereTheSourceCanBeSet(serviceName)}")
+            + $"{SourceSwitchRemedy(serviceKey, input)}{WhereTheSourceCanBeSet(serviceName)}")
             .AsMissingSetting("repository:url");
     }
 
     /// <summary>
-    /// The sources, other than this one and <c>"path"</c>, that would resolve this entry as it stands,
-    /// each asked through its own <see cref="IServiceSource.CanResolve"/> — so a switch is offered only
-    /// where the source itself says it works. Empty when none do.
+    /// The sources flagged <see cref="IServiceSource.IsSwitchRemedy"/> that would resolve this entry as it
+    /// stands, each asked through its own <see cref="IServiceSource.Requirements"/> — so a switch is
+    /// offered only where the source itself says it works. Empty when none do.
     /// </summary>
-    private static Raw SourceSwitchRemedy(Raw serviceKey, ServiceDefinition definition, ServiceDeveloperConfig config)
+    internal static Raw SourceSwitchRemedy(
+        Raw serviceKey, SourceInput input, Func<string, IServiceSource?>? lookup = null)
     {
+        lookup ??= name => ServiceSourcesBuilderExtensions.Sources.GetValueOrDefault(name);
+
         var offeredNames = new List<Raw>();
 
         foreach (var name in SourceChoices.DisplayOrder)
         {
-            if (name is "repository" or "path" or "disabled"
-                || !ServiceSourcesBuilderExtensions.Sources.TryGetValue(name, out var source)
-                || !source.CanResolve(definition, config))
+            if (lookup(name) is not { IsSwitchRemedy: true } source
+                || !SourceProbe.Evaluate(source, input).Resolves)
             {
                 continue;
             }

@@ -1829,6 +1829,34 @@ public class LocalProjectSourceTests
     private static IDistributedApplicationBuilder PlainBuilder() =>
         TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
+    private sealed class FakeRemedySource(bool isSwitchRemedy) : IServiceSource
+    {
+        public bool IsSwitchRemedy => isSwitchRemedy;
+
+        public SourceRequirements Requirements(SourceInput input) => new([], null);
+
+        public IResourceBuilder<ServiceResource> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+            ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null) =>
+            throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void SourceSwitchRemedy_SkipsSourcesNotFlaggedAsSwitchRemedy()
+    {
+        var input = new SourceInput(ServiceName, RepositorylessDefinition(), DevConfig(), "apphost");
+
+        var remedy = LocalProjectSource.SourceSwitchRemedy(
+            Raw.Literal("ServiceSources:Services:orders"),
+            input,
+            name => new FakeRemedySource(isSwitchRemedy: name == "url")).ToString();
+
+        Assert.Contains("'url'", remedy);
+        Assert.DoesNotContain("'container'", remedy);
+        Assert.DoesNotContain("'kubernetes'", remedy);
+        Assert.DoesNotContain("'disabled'", remedy);
+    }
+
     [Fact]
     public void Requirements_ProblemMessage_EqualsWhatResolveThrows()
     {
