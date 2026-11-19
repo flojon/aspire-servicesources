@@ -71,7 +71,8 @@ under `"repository"` still does the same thing, but is deprecated: it logs a sta
 the `"path"` spelling to paste instead.)
 
 - A managed checkout is cloned once into
-  `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
+  `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/` (or under
+  [`ServiceSources:CheckoutsDirectory`](#placing-checkouts-outside-the-apphost-directory)), and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
   overwriting your work. On Windows, an AppHost directory too deep for git to keep its git directory in the checkout gets a clone
@@ -852,6 +853,54 @@ exception is a group-level `"source": "path"` entry, which supplies the director
 `"path"` service that sets none — neither a developer `path.path` nor a catalog `path:`. A catalog
 `path:` is the author's own layout, so a member on `"path"` that declares one keeps it; only a developer's
 `path.path` (or `repository.path`) beats the group.
+
+## Placing checkouts outside the AppHost directory
+
+By default a managed checkout lives at `<AppHostDirectory>/.servicesources/checkouts/<name>/`. On
+Windows that can be too deep for the tools that build it, so one setting moves them:
+
+| Where | Spelling |
+| --- | --- |
+| Configuration key | `ServiceSources:CheckoutsDirectory` |
+| Environment variable | `ServiceSources__CheckoutsDirectory` |
+| `servicesources.local.json` | `"checkoutsDirectory"` at the file's root |
+
+```json
+{ "checkoutsDirectory": "C:\\ss" }
+```
+
+The value is an **absolute, local** directory such as `C:\ss`. Blank or unset keeps the default.
+A relative path, a network (UNC) path, a `\\?\` or `\\.\` device path, the AppHost directory or a
+directory containing it, and anything inside the AppHost's own `.servicesources` are refused with
+an error naming the key and the value. There is no `~` or `%VAR%` expansion by the tool: the shell
+expands the environment variable form, and a file value is written out in full.
+
+Checkouts then live at `<CheckoutsDirectory>\<hash>\checkouts\<name>`, where `<hash>` is ten hex
+digits taken from the AppHost directory's path, so several AppHosts (and several
+[worktrees](#working-in-git-worktrees)) can share one `CheckoutsDirectory` without seeing each
+other's checkouts, staging directories or lock files. The tool writes its `.gitignore`, the
+[build barrier files](#managed-checkouts-dont-inherit-your-apphost-repositorys-build-settings) and an
+`owner.json` into `<hash>`, never into the directory you named.
+
+- **The hash is of the spelling of the AppHost path.** The same directory reached through a
+  junction, a `subst` drive or an 8.3 short name gets a second namespace and a second clone.
+- **A `<hash>` directory this tool did not create is refused**, not adopted: a file, a link, or a
+  directory with no `owner.json` or one naming another AppHost stops with an error naming the
+  directory. Delete it, or point the setting elsewhere.
+- **Do not point it at a directory other users can write to.** A checkout is code that is built and
+  run.
+- **Existing checkouts are not moved or used.** Changing the setting leaves what is under
+  `.servicesources/checkouts` where it is; delete it or move it yourself.
+- **`selection.json` and `path`-checkout `prepare` markers stay under the AppHost's
+  `.servicesources`.** A managed checkout's own `prepare` marker lives inside its git directory and
+  moves with it.
+- **A catalog `path:` does not reach the checkouts.** It is confined to the AppHost's repository, and
+  an external checkout is not inside it.
+- **A linked worktree borrows objects from the main worktree's checkout** when both use the same
+  `CheckoutsDirectory`; otherwise it clones plainly.
+
+The path-too-long errors suggest this setting, and so does the
+[troubleshooting entry for MSBuild "Path ... too long"](../troubleshooting.md#msbuild-path-too-long-inside-a-checkout).
 
 ## Submodules
 
