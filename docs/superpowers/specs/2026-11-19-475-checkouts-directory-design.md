@@ -1,7 +1,7 @@
 # A setting to place managed checkouts outside the AppHost directory (#475)
 
 **Date:** 2026-11-19
-**Status:** Draft
+**Status:** Approved
 **Resolves:** #475.
 **Relates to:** #479 / #519 (short separate git directory; merged, not rebuilt here), #474 / #483 (the
 path-length refusal this reworks the wording of), #434 (linked-worktree seeding and object borrowing), #224
@@ -176,7 +176,7 @@ place" with no further change. What changes:
   and already treat an unmounted drive as "proves nothing" (`IsLocalRootedPath`). They need no change; a test pins that an
   external-root checkout is seen as live.
 - Changing the setting does not move or delete anything. A checkout already under `.servicesources\checkouts` stays there and
-  is not used; the docs say to delete or move it. (No runtime notice; see Open Questions.)
+  is not used; the docs say to delete or move it. (No runtime notice; resolved in section 7.)
 
 ### 3.7 Worktree seeding and borrowing objects
 
@@ -274,14 +274,14 @@ add `Timing`.
   Windows-only automated version (IO) builds a project at a checkout path over 260 characters only if it proves reliable.
 - `scripts/smoketest-config-layers.sh` gains a case for the new key.
 
-## 7. Open Questions
+## 7. Open Questions (resolved)
 
-1. **Hash length and the `checkouts` segment.** 10 hex and `<hash>\checkouts\<name>` cost 22 characters of working-tree
-   path. Dropping `checkouts` would save 10 but put barrier files and checkout names in one namespace. Confirm the trade.
-2. **Refusing an ancestor of the AppHost** (3.2) also refuses a root like `C:\src` when the AppHost is under it. The
-   alternative is to allow it, since only `<hash>` is written; the cost is hash directories among the developer's
-   repositories. Keep the refusal?
-3. **Relative values refused** (3.2). The alternative (resolve against the AppHost) gives every worktree a different place
-   and defeats the purpose in a deep AppHost. Confirm.
-4. **Extras left out as beyond the ticket:** borrowing from a home that used the default location (the migration case), and
-   a runtime notice when old checkouts remain under `.servicesources\checkouts`. Both are small and could follow if wanted.
+All four were answered by the human on 2026-11-19.
+
+1. **Hash length and the `checkouts` segment: keep both.** The layout is `<root>\<hash10>\checkouts\<name>`; the 22
+   characters of working-tree path are accepted so barrier files and checkout names stay in separate namespaces.
+2. **Refusing an ancestor of the AppHost: keep the refusal.** A root that is the AppHost directory or an ancestor of it
+   is a configuration error (3.2).
+3. **Relative values: refused.** The setting must be absolute (3.2).
+4. **Extras stay out of scope.** Borrowing from a home that used the default location, and a runtime notice about old
+   checkouts under `.servicesources\checkouts`, are not built here (section 5).
