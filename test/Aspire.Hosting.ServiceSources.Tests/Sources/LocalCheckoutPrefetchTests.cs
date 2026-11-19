@@ -524,7 +524,7 @@ public class LocalCheckoutPrefetchTests
 
         // A plain `throw storedException` would have reset this to the re-throw site, hiding the
         // prefetch worker the clone actually failed on.
-        Assert.Contains(nameof(LocalGitCheckout.PrepareRepoRoot), ex.StackTrace);
+        Assert.True(ex.StackTrace!.Contains(nameof(LocalGitCheckout.PrepareRepoRoot)), ex.StackTrace);
     }
 
     [Fact]
