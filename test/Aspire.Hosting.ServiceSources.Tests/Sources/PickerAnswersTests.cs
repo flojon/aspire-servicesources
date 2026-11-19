@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -8,44 +9,74 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 public class PickerAnswersTests
 {
-    private static ServiceDefinition Definition() =>
+    private static ServiceDefinition Definition(bool container = false, string? catalogUrl = null) =>
         new ServiceMetadata
         {
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
             Kubernetes = new KubernetesMetadata { Service = "orders", Port = 80 },
+            Container = container ? new ContainerMetadata { Image = "ghcr.io/company/orders", Port = 8080 } : null,
+            Url = catalogUrl is null ? null : new UrlMetadata { Url = catalogUrl },
         }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
-
-    private static readonly IReadOnlyDictionary<string, string> NoFields = new Dictionary<string, string>();
 
     // Never touched: only a 'path' answer reads the AppHost directory, and those tests are in PickerAnswersPathTests.
     private const string AppHost = "unused-apphost";
 
-    private static IReadOnlyDictionary<string, string> Fields(params (string Key, string Value)[] pairs) =>
-        pairs.ToDictionary(p => p.Key, p => p.Value);
+    // The entry the writer would merge: nested objects for a key such as "kubernetes:context".
+    internal static JsonObject Entry(params (string Key, string Value)[] pairs)
+    {
+        var entry = new JsonObject();
+
+        foreach (var (key, value) in pairs)
+        {
+            var parts = key.Split(':');
+            var node = entry;
+
+            foreach (var part in parts[..^1])
+            {
+                node = node[part] as JsonObject ?? (JsonObject)(node[part] = new JsonObject());
+            }
+
+            node[parts[^1]] = value;
+        }
+
+        return entry;
+    }
+
+    private static string? Validate(string source, JsonObject entry, ServiceDefinition? definition = null, string service = "orders") =>
+        PickerAnswers.Validate(service, source, entry, definition ?? Definition(), AppHost);
 
     [Fact]
     public void Validate_SourceNotOffered_Rejects()
     {
-        var error = PickerAnswers.Validate("orders", "container", NoFields, Definition(), AppHost);
+        var error = Validate("container", Entry());
 
         Assert.NotNull(error);
         Assert.Contains("container", error);
     }
 
     [Fact]
-    public void Validate_MissingRequiredField_Rejects()
+    public void Validate_SourceNotOffered_RejectsTheMergedEntryToo()
     {
-        var error = PickerAnswers.Validate("orders", "kubernetes", Fields(("kubernetes:context", "  ")), Definition(), AppHost);
+        var error = Validate("nonexistent", Entry(("source", "nonexistent"), ("url:url", "http://localhost:5000")));
 
         Assert.NotNull(error);
-        Assert.Contains("kubernetes:context", error);
+        Assert.Contains("is not available for service 'orders'", error);
+    }
+
+    [Fact]
+    public void Validate_MissingRequiredField_Rejects()
+    {
+        var error = Validate("kubernetes", Entry(("kubernetes:port", "80")));
+
+        Assert.NotNull(error);
+        Assert.Contains("'kubernetes.context'", error);
     }
 
     [Fact]
     public void Validate_InvalidField_ReportsValidatorMessage()
     {
-        var error = PickerAnswers.Validate("orders", "kubernetes", Fields(("kubernetes:context", " dev ")), Definition(), AppHost);
+        var error = Validate("kubernetes", Entry(("kubernetes:context", " dev ")));
 
         Assert.NotNull(error);
         Assert.Contains("context", error);
@@ -54,25 +85,46 @@ public class PickerAnswersTests
     [Fact]
     public void Validate_Valid_ReturnsNull()
     {
-        Assert.Null(PickerAnswers.Validate("orders", "url", Fields(("url:url", "http://localhost:5000")), Definition(), AppHost));
-        Assert.Null(PickerAnswers.Validate("orders", "repository", NoFields, Definition(), AppHost));
-        Assert.Null(PickerAnswers.Validate("orders", "Kubernetes", Fields(("kubernetes:context", "dev")), Definition(), AppHost));
+        Assert.Null(Validate("url", Entry(("url:url", "http://localhost:5000"))));
+        Assert.Null(Validate("repository", Entry()));
+        Assert.Null(Validate("Kubernetes", Entry(("kubernetes:context", "dev"))));
     }
 
     [Fact]
     public void Validate_ServiceNameWithColon_StillChecksItsFields()
     {
-        Assert.NotNull(PickerAnswers.Validate("a:b", "url", Fields(("url:url", "ftp://x")), Definition(), AppHost));
-        Assert.Null(PickerAnswers.Validate("a:b", "url", Fields(("url:url", "http://x")), Definition(), AppHost));
+        Assert.NotNull(Validate("url", Entry(("url:url", "ftp://x")), service: "a:b"));
+        Assert.Null(Validate("url", Entry(("url:url", "http://x")), service: "a:b"));
     }
 
     [Fact]
     public void Validate_SourceInOtherCase_StillRequiresItsFields()
     {
-        var error = PickerAnswers.Validate("orders", "Kubernetes", NoFields, Definition(), AppHost);
+        var error = Validate("Kubernetes", Entry());
 
         Assert.NotNull(error);
-        Assert.Contains("kubernetes:context", error);
+        Assert.Contains("'kubernetes.context'", error);
+    }
+
+    [Fact]
+    public void Validate_SettingAlreadyInTheFile_SatisfiesTheRequirement() =>
+        Assert.Null(Validate("url", Entry(("source", "url"), ("url:url", "http://localhost:5000"))));
+
+    [Fact]
+    public void Validate_OfferedContainerAndRepositoryEntries_PassThroughCheck()
+    {
+        Assert.Null(Validate("container", Entry(("source", "container")), Definition(container: true)));
+        Assert.Null(Validate("repository", Entry(("source", "repository"))));
+    }
+
+    [Fact]
+    public void Validate_ForgedSourceName_IsEscapedInTheMessage()
+    {
+        var error = Validate("evil\u001b[31m\nforged line", Entry());
+
+        Assert.NotNull(error);
+        Assert.DoesNotContain('\u001b', error);
+        Assert.DoesNotContain('\n', error);
     }
 
     [Theory]
@@ -81,7 +133,7 @@ public class PickerAnswersTests
     [InlineData("orders.example.com", "is not a valid absolute URL")]
     public void Validate_UrlThatWouldNotResolve_ReportsResolveMessage(string url, string expected)
     {
-        var error = PickerAnswers.Validate("orders", "url", Fields(("url:url", url)), Definition(), AppHost);
+        var error = Validate("url", Entry(("url:url", url)));
 
         Assert.NotNull(error);
         Assert.Contains(expected, error);
@@ -93,8 +145,7 @@ public class PickerAnswersTests
     [InlineData("70000")]
     public void Validate_KubernetesPortOutOfRange_ReportsResolveMessage(string port)
     {
-        var error = PickerAnswers.Validate(
-            "orders", "kubernetes", Fields(("kubernetes:context", "dev"), ("kubernetes:port", port)), Definition(), AppHost);
+        var error = Validate("kubernetes", Entry(("kubernetes:context", "dev"), ("kubernetes:port", port)));
 
         Assert.NotNull(error);
         Assert.Contains($"port value '{port}' is not a valid port", error);
@@ -105,14 +156,12 @@ public class PickerAnswersTests
     [InlineData("8080")]
     [InlineData("65535")]
     public void Validate_KubernetesPortInRange_ReturnsNull(string port) =>
-        Assert.Null(PickerAnswers.Validate(
-            "orders", "kubernetes", Fields(("kubernetes:context", "dev"), ("kubernetes:port", port)), Definition(), AppHost));
+        Assert.Null(Validate("kubernetes", Entry(("kubernetes:context", "dev"), ("kubernetes:port", port))));
 
     [Fact]
     public void Validate_KubernetesUnsupportedScheme_ReportsResolveMessage()
     {
-        var error = PickerAnswers.Validate(
-            "orders", "kubernetes", Fields(("kubernetes:context", "dev"), ("kubernetes:scheme", "ftp")), Definition(), AppHost);
+        var error = Validate("kubernetes", Entry(("kubernetes:context", "dev"), ("kubernetes:scheme", "ftp")));
 
         Assert.NotNull(error);
         Assert.Contains("scheme 'ftp' is not supported", error);
@@ -122,8 +171,7 @@ public class PickerAnswersTests
     [InlineData("http")]
     [InlineData("https")]
     public void Validate_KubernetesSupportedScheme_ReturnsNull(string scheme) =>
-        Assert.Null(PickerAnswers.Validate(
-            "orders", "kubernetes", Fields(("kubernetes:context", "dev"), ("kubernetes:scheme", scheme)), Definition(), AppHost));
+        Assert.Null(Validate("kubernetes", Entry(("kubernetes:context", "dev"), ("kubernetes:scheme", scheme))));
 
     // The first layer is the developer-config file's, as DeveloperConfigFileSource registers it.
     private static IConfigurationRoot Root(params IDictionary<string, string?>[] layers)
@@ -215,8 +263,7 @@ public class PickerAnswersPathTests
             Project = "Orders.csproj",
         }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
 
-    private static IReadOnlyDictionary<string, string> PathField(string path) =>
-        new Dictionary<string, string> { ["path:path"] = path };
+    private static JsonObject PathField(string path) => PickerAnswersTests.Entry(("path:path", path));
 
     [Fact]
     public void Validate_PathThatDoesNotExist_ReportsResolveMessage()

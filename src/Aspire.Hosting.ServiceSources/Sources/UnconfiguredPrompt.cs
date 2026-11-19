@@ -257,7 +257,7 @@ internal static class UnconfiguredPrompt
             .FirstOrDefault(offered => string.Equals(offered, answer, StringComparison.OrdinalIgnoreCase)) ?? answer;
 
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
-        var followUp = SourceFollowUp.FieldsFor(source, service.Definition);
+        var followUp = SourceChoices.Requirements(source, service.Definition).Fields;
 
         if (followUp.Count > 0)
         {
@@ -276,11 +276,6 @@ internal static class UnconfiguredPrompt
             fields = answered;
         }
 
-        if (PickerAnswers.Validate(service.ServiceName, source, fields, service.Definition, appHostDirectory) is { } invalid)
-        {
-            return Failed(logger, name, Raw.Output(invalid));
-        }
-
         var shadowedBy = services.GetService<IConfiguration>() is IConfigurationRoot root
             ? PickerAnswers.ShadowingProvider(root, service.ServiceName)
             : null;
@@ -291,7 +286,7 @@ internal static class UnconfiguredPrompt
                 source,
                 fields,
                 token,
-                entry => PickerAnswers.ValidateEntry(service.ServiceName, source, entry, service.Definition, appHostDirectory))
+                entry => PickerAnswers.Validate(service.ServiceName, source, entry, service.Definition, appHostDirectory))
             .ConfigureAwait(false);
         if (!result.Saved)
         {

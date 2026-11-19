@@ -63,6 +63,10 @@ public class SourceRequirementsTests
     }
 
     [Fact]
+    public void Url_WhitespaceCatalogUrl_AsksUrl() =>
+        Assert.Equal([("url:url", true)], Keys(new UrlSource().Requirements(Input(Definition(url: " ")))));
+
+    [Fact]
     public void Url_CatalogUrlPresent_NoFields_Resolves()
     {
         var requirements = new UrlSource().Requirements(Input(Definition(url: "https://orders.example.com")));

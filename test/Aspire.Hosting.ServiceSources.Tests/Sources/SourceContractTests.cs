@@ -225,6 +225,22 @@ public class SourceContractTests
     }
 
     [Fact]
+    public void EveryField_HasALabel()
+    {
+        var appHost = AppHost();
+
+        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
+        {
+            foreach (var sample in Samples())
+            {
+                Assert.All(
+                    source.Requirements(Input(sample.Definition, new ServiceDeveloperConfig(), appHost)).Fields,
+                    field => Assert.False(string.IsNullOrWhiteSpace(field.Label), $"Source '{name}': '{field.Key}' has no label."));
+            }
+        }
+    }
+
+    [Fact]
     public void ResolvesImpliesOffered_ForEveryRegisteredSource_OverEverySample()
     {
         var appHost = AppHost();

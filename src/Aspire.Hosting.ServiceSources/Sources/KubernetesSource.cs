@@ -126,9 +126,6 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : ServiceSo
     /// Every configuration check <see cref="Resolve"/> makes, in the same order, without allocating a port.
     /// </summary>
     /// <exception cref="ServiceSourcesConfigurationException">The configuration would not resolve.</exception>
-    internal static void Validate(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        CheckEntry(serviceName, definition, config);
-
     private static KubernetesChecked CheckEntry(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
         // The scheme is a catalog fact no dialog answer fixes, so it is judged before the context and
