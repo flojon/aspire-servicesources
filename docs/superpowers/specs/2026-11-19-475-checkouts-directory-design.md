@@ -11,7 +11,9 @@ path-length refusal this reworks the wording of), #434 (linked-worktree seeding 
 
 Every managed checkout is `<AppHost>\.servicesources\checkouts\<name>`. `LocalGitCheckout.ManagedRepoRoot(appHostDirectory,
 checkoutName)` is the one pure function that names it, and it is called from `DeferredCheckout` (four sites),
-`LocalCheckoutPrefetch`, `LocalGitCheckout.PrepareRepoRoot` and `ReferenceCheckout`. #519 lets git keep its git
+`LocalGitCheckout.IsColdManagedCheckout`, `PrepareRepoRoot` (which takes the AppHost directory as a string and is called from
+`LocalCheckoutPrefetch` twice), `DeferredCheckout.BlockedChangedCommand` (a static method with no builder) and
+`ReferenceCheckout`. #519 lets git keep its git
 directory in a short per-user path, but the working tree is still under the AppHost, so an AppHost directory
 past roughly 190 characters is refused, and the ticket's smoke test (comment on #475) shows a 145-character
 AppHost already fails later: the service's `dotnet run` hits MSBuild "Path ... too long" inside the checkout.
@@ -19,7 +21,7 @@ Deep AppHost paths are routine with worktree tools (`.claude/worktrees/<long-nam
 
 There is no way to put checkouts elsewhere. This spec adds one.
 
-## 2. Decisions already made by the human (not reopened)
+## 2. Decisions already made by the human
 
 1. A full relocation setting, `ServiceSources:CheckoutsDirectory`: a configuration key, so it is also the
    environment variable `ServiceSources__CheckoutsDirectory`, the command line, user secrets, appsettings, and
@@ -27,7 +29,8 @@ There is no way to put checkouts elsewhere. This spec adds one.
 2. The default stays `<AppHost>\.servicesources\checkouts`. A short Windows path (for example `C:\ss`) is only
    documented, and suggested in the path-too-long errors. Nothing switches to a per-user location by default.
 3. `selection.json` and the `path`-source prepare markers (`.servicesources/prepare/<service>.json`) stay with the
-   AppHost.
+   AppHost. (A managed checkout's own prepare marker lives inside its git directory today and moves with the
+   checkout; see 3.9. The wording is amended to say so, it is not a departure from the intent.)
 4. Under an external directory, checkouts are namespaced by a hash of the AppHost path, and the leftover sweep and
    lock files are scoped to that subfolder.
 
@@ -35,219 +38,250 @@ There is no way to put checkouts elsewhere. This spec adds one.
 
 ### 3.1 The setting
 
-`DeveloperConfiguration.CheckoutsDirectoryKey = "ServiceSources:CheckoutsDirectory"`, added to
-`DeveloperConfigFileSource.ReRootedValues` as `("checkoutsDirectory", CheckoutsDirectoryKey)`. Blank or unset means the
-default. No public API changes (configuration only, like `RepositoryRoot`), so `PublicAPI.*.txt` is untouched.
+`DeveloperConfiguration.CheckoutsDirectoryKey = "ServiceSources:CheckoutsDirectory"`, plus
+`DeveloperConfigFileSource.FileCheckoutsDirectoryKey = "checkoutsDirectory"` (an `internal const`, like
+`FileRepositoryRootKey`) added to `ReRootedValues`. Blank or unset means the default. No public API changes
+(configuration only, like `RepositoryRoot`), so `PublicAPI.*.txt` is untouched.
 
-A new internal `CheckoutsLocation` is resolved **once per builder** and cached beside `ServiceSourcesConfigCache`
-(a `ConditionalWeakTable` keyed on the builder, so the many call sites cannot disagree). It carries:
+A new internal `CheckoutsLocation` is computed **once per builder** and cached beside `ServiceSourcesConfigCache`
+(a `ConditionalWeakTable` keyed on the builder, so call sites cannot disagree). Computing it is **pure string work**: no
+filesystem access, no exceptions for filesystem state, so `ManagedRepoRoot` keeps the purity its documentation promises
+and deferral (DCP freezes the path before the clone) still works. It carries `OwnedDirectory`, `CheckoutsRoot`
+(`OwnedDirectory\checkouts`) and `IsExternal`, and a `Problem` (a configuration error computed lexically, 3.2) that is
+thrown only by the callers that are about to act.
 
-- `ToolDirectory`: where the checkouts' sibling files (`.gitignore`, build barrier) live.
-- `CheckoutsRoot`: `ToolDirectory\checkouts`.
-- `IsExternal`.
-
-| Setting | `ToolDirectory` | `CheckoutsRoot` |
+| Setting | `OwnedDirectory` | `CheckoutsRoot` |
 |---|---|---|
 | unset | `<AppHost>\.servicesources` | `<AppHost>\.servicesources\checkouts` |
 | `C:\ss` | `C:\ss\<hash>` | `C:\ss\<hash>\checkouts` |
 
-`ManagedRepoRoot(appHostDirectory, checkoutName)` becomes `ManagedRepoRoot(CheckoutsLocation, checkoutName)`; the
-containment check (`IsContainedCheckoutDirectoryName`) is unchanged and still runs inside it. Every caller already has
-the builder, so each obtains the location from it. Everything that is not a checkout stays keyed on the AppHost
-directory: `ToolDirectory.PathIn(appHost)` for `selection.json`, `worktree-seed.json` and the `path`-checkout prepare
-markers.
+(The property is `OwnedDirectory`, not `ToolDirectory`, which is already the static class for the AppHost's own
+`.servicesources`.)
 
-The namespaced layout keeps the `checkouts` segment (`<root>\<hash>\checkouts\<name>`) rather than putting names
-directly under `<hash>`. It costs 10 characters but means the hash directory is shaped exactly like `.servicesources`,
-so the `.gitignore`, the build barrier files and the `.incoming-*` staging and lock files sit beside the checkouts
-exactly as today, and none can collide with a service's checkout name.
+**Call sites.** `ManagedRepoRoot(string appHostDirectory, string name)` becomes `ManagedRepoRoot(CheckoutsLocation, string
+name)`; the containment check stays inside it. Every site is changed to take the location instead of (or beside) the
+AppHost string: `IsColdManagedCheckout` (callers `DeferredCheckout` and `LocalCheckoutPrefetch`), `PrepareRepoRoot` (the
+`EnsureToolDirectory` and `ManagedRepoRoot` calls, and its two prefetch callers), `DeferredCheckout.BlockedChangedCommand`
+and its caller, the other `DeferredCheckout` sites, and `ReferenceCheckout`, which also needs the home's AppHost directory
+to compute the home's hash (3.7). Everything that is not a checkout stays keyed on the AppHost directory:
+`ToolDirectory.PathIn(appHost)` for `selection.json`, `worktree-seed.json` and `path`-checkout prepare markers, and their
+existing `ToolDirectory.Ensure(appHost)` calls (`SourceSelectionStore`, `PrepareMarker`) still create that directory's
+`.gitignore` even when checkouts are external.
+
+**Errors.** `Problem` is raised where the work is real: the actual `AddService` and deferred `Register` paths report it as
+a configuration error. The speculative background prefetch (`LocalCheckoutPrefetch`, whose contract is that speculation
+never fails `AddService`) treats a location with a `Problem` as "nothing to prefetch" and lets the real path report it.
+
+The namespaced layout keeps the `checkouts` segment (`<root>\<hash>\checkouts\<name>`) so the owned directory is shaped like
+`.servicesources`: the `.gitignore` and the build barrier files (written by `CheckoutBuildBarrier`) sit in the owned
+directory, and the checkouts, their `.incoming-*` staging directories and `.incoming-*.lock` files sit in `checkouts\`, as
+today. That keeps the tool's own files out of the namespace of checkout names, so a checkout cannot collide with a barrier
+file. `.incoming-*` names inside `checkouts\` are as before.
 
 ### 3.2 Resolving the value
 
-- Relative values resolve against the AppHost directory, like every other path a developer writes
-  (`ResolveConfiguredRepositoryRoot` does the same). Absolute is recommended and documented, because a relative value
-  in a seeded worktree resolves differently per worktree (see 3.7).
-- No `~` or `%VAR%` expansion (the configuration providers already substitute environment variables for the env var
-  form; a literal `%LOCALAPPDATA%` in a file is not expanded and the docs say to write the path out).
-- The value is resolved lazily, at the first managed-checkout path computation, not at `AddServiceSources` time, so an
-  AppHost with only `path` services never reads or creates anything. The directory is created at first clone
-  (`Directory.CreateDirectory`), not at resolution.
-- Refused with a `ServiceSourcesConfigurationException` naming the key, the value and the resolved path, when the
-  resolved path exists and is a file, is a filesystem root with no usable child, cannot be created, or **is the AppHost
-  directory or contains it** (an ancestor). The last rule is what keeps a misconfigured value from placing a hash
-  directory inside the repository's own source tree or scattering them across a directory the developer uses for other
-  things. An external directory *inside* the AppHost's repository (not an ancestor of the AppHost) is allowed; see 3.4.
+Lexical rules, applied when the location is computed, producing `Problem` on a violation (messages name the key, the
+value and the resolved path):
 
-### 3.3 Hash namespace
+- **Absolute only.** A relative value is refused. Resolving it against the AppHost would give every linked worktree its own
+  sibling directory and place checkouts beside, or inside, the tree this setting exists to escape, and `PathOverrideCheck`
+  does not cover this key. (This removes the seeded-relative-value question; it also keeps the setting from meaning
+  something different per worktree.)
+- **Local paths only.** UNC (`\server\share`), `\?\` and `\.\` forms are refused (the rule `SeparateGitDirectories.IsLocalRootedPath`
+  already applies), because a committed configuration value must not be able to make the tool open an SMB connection.
+- **Not at or around the AppHost.** Refused when the resolved root is the AppHost directory or one of its ancestors (the
+  owned directory would land among source), or lies inside the AppHost's `.servicesources` (a collision with the default
+  layout). A root elsewhere inside the AppHost's repository is allowed (3.4). A filesystem root such as `C:\` is allowed
+  (`C:\<hash>`).
+- No `~` expansion, and no `%VAR%` expansion by this tool: the shell expands the environment variable form
+  (`ServiceSources__CheckoutsDirectory=C:\ss`), and in a file the path is written out.
 
-`<hash>` = the first 10 hex characters of SHA-256 over the AppHost directory, built the way
-`ManagedGitDirectory.HashOf` builds its input (`GetFullPath`, trailing separator trimmed, upper-cased, UTF-8), so two
-spellings of one Windows path agree. Ten hex is 40 bits: no realistic collision among one developer's AppHosts, and
-shorter than #519's 16 because this segment is paid on the working tree path, which is the scarce one. The AppHost
-directory is the key because the AppHost is the unit that owns `selection.json`, prepare state and configuration, and
-because linked worktrees have distinct AppHost directories (3.7).
+Filesystem rules, checked only at the point a clone is about to happen (the same place `EnsureToolDirectory` runs
+today), never while a path is merely computed or by the prefetch's speculative check:
 
-Two AppHosts sharing one `CheckoutsDirectory` therefore never see each other's checkouts, staging directories, locks or
-barrier files. Two *runs of the same AppHost* still share a namespace, and are protected exactly as today
-(`CheckoutNameLock`, the `.incoming-*.lock` ownership, rename into place).
+- The root, if it exists, is a directory, and can be created if it does not (`CreateDirectory`, failing as a
+  configuration error naming the key).
+- The owned directory passes the ownership check in 3.3.
 
-A pre-existing `<hash>` that is a file or a reparse point is refused rather than followed: the recursive delete of
-debris and the sweeps act under it, so a link planted at that name must not redirect them. (Same posture as
-`SeparateGitDirectories.SweepOne`, which skips reparse points.)
+### 3.3 Hash namespace and ownership
+
+`<hash>` = the first 10 hex characters of SHA-256 over the AppHost directory, built the way `ManagedGitDirectory.HashOf`
+builds its input (`GetFullPath`, trailing separator trimmed, upper-cased, UTF-8). Ten hex is 40 bits: no realistic
+collision among one developer's AppHosts, and shorter than #519's 16 because this segment is paid on the working-tree path.
+The AppHost directory is the key because it owns `selection.json`, prepare state and configuration, and because linked
+worktrees have distinct AppHost directories (3.7).
+
+Known limits, documented rather than solved: the hash is of the spelling, so the same directory reached through a
+junction, a `subst` drive or an 8.3 name gets a second namespace and a second set of clones; and upper-casing merges two
+Linux directories that differ only in case (rare; it only shares checkouts). Neither is a safety problem.
+
+**The name is predictable, so ownership is checked.** Anyone who can write to a shared root could pre-create
+`<root>\<hash>\checkouts\<name>` holding a repository with a matching origin, and the existing adoption of a checkout on an
+origin match would then build and run it. So at clone time, before anything is written into it (including the `.gitignore`
+and barrier files), the owned directory is handled like this:
+
+- Absent: created by this run, and an owner record (`owner.json`, naming the AppHost directory) is written into it.
+- Present, a directory, not a reparse point, with an owner record naming this AppHost: used.
+- Anything else (a file, a reparse point, a directory with no record or with another AppHost's record): refused with an
+  error naming the directory, so the developer deletes it. The tool never adopts or deletes a directory it did not create.
+  There is a check-then-use gap against a hostile local user racing the creation; a root another user can write to is
+  outside what the tool defends against, and the docs say so (section 4).
+
+The recursive delete of "debris" with no `.git` (`CloneIntoPlace`) and the staging sweeps therefore only run inside a
+directory this tool created; the comment there saying everything under `.servicesources` is tool-managed is updated to say
+"under an owned directory". `ScratchDirectory.SweepAbandoned`/`SweepOne` currently has no reparse-point check and gains one
+(skip, as `SeparateGitDirectories.SweepOne` does), because a planted link is now reachable from a root the developer chose.
+
+Two AppHosts sharing one `CheckoutsDirectory` never see each other's checkouts, staging directories, locks or barrier
+files. Two runs of the same AppHost share a namespace and are protected as today (`CheckoutNameLock`, `.incoming-*.lock`
+ownership, rename into place).
 
 ### 3.4 `.gitignore` and the build barrier
 
-Both are written into `CheckoutsLocation.ToolDirectory`, never into the configured root itself. The root can be a
-directory the developer uses for other things (`C:\src`), and a `*` `.gitignore` or a `Directory.Build.props` written
-there would change the status and the builds of everything else under it. The tool-created `<hash>` directory is
-tool-owned by construction, so it gets `ToolDirectory.Ensure`-style treatment: `.gitignore` (`*`, `!.gitignore`) and
-`CheckoutBuildBarrier.Ensure`. `ToolDirectory.Ensure` is refactored from `Ensure(appHostDirectory)` into a path-based
-`Ensure(directory)` plus the existing AppHost overload.
+Both are written into `CheckoutsLocation.OwnedDirectory`, never into the configured root. The root can be a directory the
+developer uses for other things (`C:\src`), and a `*` `.gitignore` or a `Directory.Build.props` written there would change the
+status and the builds of everything else under it. The owned directory is tool-created (3.3), so it gets the same treatment
+as `.servicesources`: `.gitignore` (`*`, `!.gitignore`) and `CheckoutBuildBarrier.Ensure`, after the ownership check. A new
+`ToolDirectory.EnsureAt(string directory)` holds the shared body and `Ensure(appHostDirectory)` calls it (a distinct name,
+since both take a string).
 
-The barrier is still wanted externally: a root under a directory that has its own `Directory.Build.props`,
-`nuget.config`, `.editorconfig` or `.mvn` would otherwise leak into every checkout, which is exactly #224's concern. The
-`.gitignore` matters only when the root lies inside some git repository, and costs nothing when it does not.
+The barrier is still wanted externally: a root under a directory that has its own `Directory.Build.props`, `nuget.config`,
+`.editorconfig` or `.mvn` would otherwise leak into every checkout, which is #224's concern. The `.gitignore` matters only
+when the root lies inside some git repository, and costs nothing when it does not.
 
 ### 3.5 Path-length model and the refusal wording
 
-`CloneLayout.Decide` already works from the real checkout and staging paths, so a short external root simply decides
-"in place" with no further change. What changes:
+`CloneLayout.Decide` already works from the real checkout and staging paths, so a short external root simply decides "in
+place" with no further change. What changes:
 
-- `GitPathLimit.StagingSuffixLength`, `MaxInPlaceAppHostLength` and `MaxSeparateAppHostLength` are expressed against the
-  AppHost directory plus the fixed `.servicesources\checkouts` tail. They are replaced by a computation from the
-  actual `CheckoutsRoot` (budget in characters for the root, not for the AppHost). The messages that quote them
-  (`CloneLayout.Decide`, `GitPathLimit.GitRootRefusal`, `NoteExistingCheckout`) take the location.
-- The three "move the AppHost to a shorter path" refusals gain the alternative, and name the setting: for the default
-  location, "or set `ServiceSources:CheckoutsDirectory` (environment variable `ServiceSources__CheckoutsDirectory`) to
-  a short directory such as `C:\ss`"; when the location is already external, they say to shorten
-  `CheckoutsDirectory` and no longer tell the developer to move the AppHost.
-- The 145-character case (ticket comment) is not refused by git, it fails in MSBuild inside the checkout, so no
-  refusal fires. The fix there is documentation (troubleshooting entry naming the MSBuild error) plus the setting.
-  The tool does not try to predict MSBuild's limit.
+- `GitPathLimit.StagingSuffixLength`, `MaxInPlaceAppHostLength` and `MaxSeparateAppHostLength` (pinned today at 170 and 190
+  by `GitPathLimitTests`) stay as the default-location budgets. For an external root the budget is stated for the owned
+  directory: the longest `CheckoutsRoot` is the working-tree (or in-place) root limit minus `\.incoming-<id>` (19), and the
+  messages quote that figure instead of an AppHost length.
+- The three refusals (`CloneLayout.Decide`, `GitPathLimit.GitRootRefusal`, `NoteExistingCheckout`) take the location. For
+  the default location each gains "or set `ServiceSources:CheckoutsDirectory` (environment variable
+  `ServiceSources__CheckoutsDirectory`) to a short directory such as `C:\ss`". For an external location they say to shorten
+  `CheckoutsDirectory` and no longer say to move the AppHost. `NoteExistingCheckout`'s "move it out of the AppHost's
+  `.servicesources` directory" is reworded to name the actual checkouts directory.
+- The 145-character case is not refused by git; it fails in MSBuild inside the checkout, so no refusal fires and the tool
+  does not try to predict MSBuild's limit. The fix is documentation (a troubleshooting entry naming the MSBuild error) and the
+  setting.
 
 ### 3.6 Sweep, locks and existing checkouts
 
-- `ScratchDirectory.SweepAbandoned(checkoutsRoot, ...)` and `ScratchDirectory.Create(checkoutsRoot)` already take the
-  root as a parameter. They receive `CheckoutsRoot`, which is the `<hash>\checkouts` directory, so they only ever see
-  this AppHost's staging directories and locks. No change to their logic.
-- `SeparateGitDirectories.SweepOrphans` and `ManagedGitDirectory` work from an owner record naming the checkout's full
-  path and already treat an unmounted drive as "proves nothing" (`IsLocalRootedPath`). They are location-independent and
-  need no change; a test pins that an external-root checkout is seen as live.
-- Changing the setting does not move or delete anything. A checkout already under `.servicesources\checkouts` stays
-  there and is not used. When the setting is external and the default location still holds checkout directories, a
-  notice says so once per run and names the directory, so the developer can delete or move them (same style as the
-  #519 "delete and re-clone" notice; notice only).
+- `ScratchDirectory.SweepAbandoned(checkoutsRoot, ...)` and `Create(checkoutsRoot)` take the root as a parameter and receive
+  `<hash>\checkouts`, so they only see this AppHost's staging directories and locks. Their logic is unchanged apart from the
+  reparse-point skip in 3.3.
+- `SeparateGitDirectories.SweepOrphans` and `ManagedGitDirectory` work from an owner record naming the checkout's full path
+  and already treat an unmounted drive as "proves nothing" (`IsLocalRootedPath`). They need no change; a test pins that an
+  external-root checkout is seen as live.
+- Changing the setting does not move or delete anything. A checkout already under `.servicesources\checkouts` stays there and
+  is not used; the docs say to delete or move it. (No runtime notice; see Open Questions.)
 
 ### 3.7 Worktree seeding and borrowing objects
 
-- `WorktreeSeed` copies `servicesources.local.json` and `selection.json`, never checkouts, so it needs no change. A
-  seeded file carrying a relative `checkoutsDirectory` resolves differently in the linked worktree; `PathOverrideCheck`
-  does not cover the repository root today either. Decision: leave it, and the docs recommend an absolute value. (If
-  the review wants a notice, it is a small addition to `PathOverrideCheck`; listed in Open Questions.)
-- Each worktree has its own AppHost directory, so each has its own `<hash>` namespace and its own checkouts. This is the
-  point: a deep `.claude/worktrees/...` AppHost gets short, independent checkouts.
-- Borrowing (`ReferenceCheckout`) computes the home worktree's candidate. It becomes: the home's checkout under **this
-  run's resolved root** (`<root>\<hash(home AppHost)>\checkouts\<name>`), then, if that is not a usable reference, the
-  home's checkout at its default location. The second candidate covers the common migration where the home worktree's
-  clones were made before the setting existed. Both candidates go through the existing checks (a `.git` directory or a
-  separate git directory this tool made, and a matching origin URL), and any failure still degrades to a clone without a
-  reference. If the home worktree used a *different* external root, nothing is found and the clone is made without
-  borrowing; there is no way to know the other worktree's setting without reading its configuration, which this does
-  not do.
+- `WorktreeSeed` copies `servicesources.local.json` and `selection.json`, never checkouts, so it needs no change. Because the
+  setting must be absolute (3.2), a seeded file means the same thing in the linked worktree.
+- Each worktree has its own AppHost directory, so its own `<hash>` namespace and checkouts. That is the point: a deep
+  `.claude/worktrees/...` AppHost gets short, independent checkouts.
+- Borrowing: `ReferenceCheckout` gains this run's `CheckoutsLocation` and computes the home's candidate as
+  `<root>\<hash(home AppHost)>\checkouts\<name>` under **this run's root**. The home path comes from git (`WorktreeHome`),
+  this run's from `builder.AppHostDirectory`; a spelling difference (junction, 8.3) makes the candidate miss and the clone
+  proceeds without borrowing. The existing checks (a `.git` directory or a separate git directory this tool made, and a
+  matching origin URL) still apply, and any failure still degrades to a plain clone. A home that used a different root or the
+  default location is not found; reading another worktree's configuration is out of scope.
 
 ### 3.8 `path`-source confinement
 
 No rule changes, and none is needed. What each confinement is anchored to:
 
-- A catalog `path:` is confined to the AppHost's repository root (`PathSource.ConfinementRootOf`: nearest `.git`
-  ancestor of the AppHost, or `ServiceSources:RepositoryRoot`). It never involved the checkouts directory.
-- A path inside a managed checkout (`ConfineProject`, `CheckoutRelativePath`) is confined lexically to that checkout's
-  root, wherever it is.
+- A catalog `path:` is confined to the AppHost's repository root (`PathSource.ConfinementRootOf`: nearest `.git` ancestor of
+  the AppHost, or `ServiceSources:RepositoryRoot`). It never involved the checkouts directory.
+- A path inside a managed checkout (`ConfineProject`, `CheckoutRelativePath`) is confined lexically to that checkout's root,
+  wherever it is.
 - A developer `repository.path` or `path.path` override is an arbitrary developer directory by design.
 
-The one interaction is that `ConfinementRootOf` finds the repository by walking up from the AppHost directory; an
-external `CheckoutsDirectory` outside that repository means a managed checkout is no longer *inside* the AppHost's
-repository tree. Nothing relied on that: the build barrier (3.4) is what isolates checkout builds, and the checkout is
-its own repository. The docs say this plainly so nobody expects a `path:` to reach the checkouts.
+The one interaction: an external `CheckoutsDirectory` outside the AppHost's repository means a managed checkout is no longer
+inside that repository's tree. Nothing relied on that: the build barrier (3.4) isolates checkout builds, and the checkout is
+its own repository. The docs say plainly that a `path:` does not reach the checkouts.
 
 ### 3.9 Prepare markers
 
-A managed checkout's prepare marker lives inside the clone's git directory (`<checkout>\.git\servicesources-prepare.json`
-or the separate git directory), not under `.servicesources\prepare`. It therefore moves with the checkout, which is
-correct (a re-cloned checkout must re-prepare) and needs no work. Decision 3 ("prepare markers stay with the AppHost")
-is read as the `path`-checkout markers that actually live under `.servicesources\prepare`; those are unchanged. Flagged in
-Open Questions in case the intent was different.
+A managed checkout's prepare marker lives inside the clone's git directory (`<checkout>\.git\servicesources-prepare.json` or
+the separate git directory), not under `.servicesources\prepare`. It moves with the checkout, which is correct (a re-cloned
+checkout must re-prepare) and needs no work. Decision 3 is therefore about the `path`-checkout markers that do live under
+`.servicesources\prepare`; those are unchanged.
 
 ## 4. Attack surface
 
-- **What the setting trusts.** The value comes from configuration, which includes a committed `appsettings.json` or a
-  `servicesources.local.json` a teammate shares, so a hostile value is possible. The tool writes only to
-  `<value>\<hash>\...` (a directory it creates) and deletes only under `<hash>\checkouts` (debris with no `.git`, its own
-  `.incoming-*` directories). It never deletes, writes a `.gitignore` or a barrier file into the configured directory
-  itself (3.4), and refuses an ancestor of the AppHost (3.2). A hostile value can therefore at worst make the tool create
-  a `<hash>` directory and clone into it somewhere writable; it cannot make the tool delete or overwrite existing
-  content, which is a smaller effect than the clone destination a `path` override already gives.
-- **Pre-planted links.** `<hash>` as a reparse point or file is refused (3.3). `<hash>\checkouts` is created by the tool
-  inside it. A link planted deeper by someone with write access to a directory the developer chose is outside what this
-  tool defends against, same as for `.servicesources` today.
-- **Shared root, several users or AppHosts.** Namespacing isolates AppHosts; it is not an access boundary. A root other
-  local users can write to is the developer's choice, and the docs say so: a checkout is code that gets built and run.
+- **What the setting trusts.** The value comes from configuration, including a committed `appsettings.json` or a shared
+  `servicesources.local.json`, so a hostile value is possible. It must be absolute and local (UNC and device paths are
+  refused, so it cannot trigger an SMB connection), and not the AppHost or an ancestor. The tool then creates `<value>\<hash>`
+  only if absent, writes an owner record, `.gitignore` and barrier files inside it only, and deletes only under
+  `<hash>\checkouts` (debris with no `.git`, its own `.incoming-*`). It never adopts an existing `<hash>` it did not create
+  (3.3), and never writes into or deletes from the configured directory itself. A hostile value can at worst make the tool
+  create a directory and clone into it somewhere local and writable, a smaller effect than the clone destination a `path`
+  override already allows.
+- **Predictable names and planted content.** The hash is not secret. The owner record and the refusal of an unowned
+  `<hash>` (3.3) stop the tool adopting a checkout somebody pre-planted there. What is left is a local race against creation
+  by a user who can already write to the developer's chosen root; the docs tell developers not to point the setting at a
+  directory other users can write to, since a checkout is code that is built and run.
+- **Links.** `<hash>` as a reparse point is refused, and the staging sweep skips reparse points (3.3).
 - **Prepare commands** still run with the checkout as working directory; relocation changes where, not what, runs, and the
   existing approval and confinement rules are untouched.
 - **Information.** The refusals quote the resolved path, as the existing path refusals do.
 
 ## 5. Scope
 
-In: the setting and its resolution (`CheckoutsLocation`), threading it through `ManagedRepoRoot` and its callers, the
-`ToolDirectory.Ensure` refactor, hash namespacing, the refusal and notice wording, `ReferenceCheckout`, tests, docs
-(`docs/sources/repository.md`, `docs/guides/configuration.md`, `docs/troubleshooting.md`) and a `CHANGELOG.md` entry
-under Added.
+In: the setting and its resolution (`CheckoutsLocation`), threading it through `ManagedRepoRoot` and its callers (1, 3.1),
+the `ToolDirectory.EnsureAt` refactor, hash namespacing and ownership, the reparse skip in the staging sweep, the refusal
+wording, `ReferenceCheckout`, tests, docs (`docs/sources/repository.md`, `docs/guides/configuration.md`,
+`docs/troubleshooting.md`), the XML docs that hard-code `.servicesources/checkouts/<serviceName>` beneath the AppHost
+(`ServiceSourcesBuilderExtensions`, `CheckoutBuildBarrier`, `LocalGitCheckout`), and a `CHANGELOG.md` entry under Added.
 
 Out: moving existing checkouts automatically; a per-user default; a builder API for the setting; #479's separate git
-directory (already shipped; this composes with it); reading another worktree's configuration; changing where
-`selection.json` or `.servicesources\prepare` live.
+directory (shipped; this composes with it); reading another worktree's configuration; changing where `selection.json` or
+`.servicesources\prepare` live.
 
 Overlap: open PR #529 touches `CHANGELOG.md`, `docs/sources/repository.md` and `DeferredCheckout.cs`, all of which this
 touches. Merge order is the human's; whichever lands second rebases.
 
 ## 6. Testing
 
-Traits per the repo: pure tests need none; tests that create directories get `[Trait("IO", "true")]`.
+Traits per the repo: pure tests carry none; tests that touch the filesystem, including reparse-point tests and any test that
+runs `dotnet`, carry `[Trait("IO", "true")]`; tests that race two AppHosts add `Concurrency`, and any that wait on a timeout
+add `Timing`.
 
-- `CheckoutsLocation` (pure plus temp dir): unset gives the default layout; absolute and relative values resolve; the same
-  AppHost spelled with different case or a trailing separator gives one hash on Windows; two AppHosts give two hashes;
-  refusals for a file, the AppHost directory and an ancestor; lazy (resolving the location creates nothing).
-- `ManagedRepoRoot` with an external location, plus the existing containment tests still passing for `..` names.
-- Two AppHosts, one root (IO): clones do not see each other's `.incoming-*` or locks; sweeping from one leaves the
-  other's staging and lock alone; the `<hash>` directory holds `.gitignore` and the barrier files and the root does not.
-- `<hash>` as a reparse point or file is refused (reparse test skipped where links cannot be created).
-- Borrowing (IO, fake or real git as the existing `ReferenceCheckout` tests do): home under the same external root is
-  found; home at its default location is found as the fallback; origin mismatch still refused; a different external root
-  falls back to a plain clone.
-- Messages: the three refusals name the setting for the default location and say to shorten it for an external one.
-- Notice when the setting is external and `.servicesources\checkouts` is non-empty; no notice when empty or absent.
-- Separate-git-directory interplay (#519 seam `CloneLayoutOptions`): a long external root still decides separate or
-  refused by the real path length.
-- **Verify leg for the ticket's own case** (cannot run on the ubuntu CI): on the Windows dev box, an AppHost whose
-  directory is about 145 characters, `ServiceSources__CheckoutsDirectory=C:\ss`, a managed service with a deep project,
-  and `dotnet run` of that service reaches a running state where the same AppHost without the setting fails with the
-  MSBuild "Path too long" error. Result recorded in the PR; a `[SkippableFact]`-style Windows-only test builds a project
-  at a checkout path over 260 characters under the external root only if it proves reliable.
-- CHANGELOG, docs and the `scripts/smoketest-*.sh` family are unaffected except that the config-layers smoke test should
-  gain a case for the new key.
+- `CheckoutsLocation` (pure): unset gives the default layout; an absolute value gives `<root>\<hash>\checkouts`; relative,
+  UNC, `\\?\`, the AppHost directory, an ancestor, and a path inside `.servicesources` give a `Problem`; computing creates
+  nothing; one hash for case and trailing-separator variants of one path, two hashes for two AppHosts.
+- `ManagedRepoRoot` with an external location, and the existing containment tests for `..` names still passing.
+- Prefetch with a `Problem` location: no throw from the speculative path; the real `AddService` path reports it.
+- Ownership (IO): an absent `<hash>` is created with a record; one with this AppHost's record is used; a file, a reparse
+  point (skipped where links cannot be created), a directory with no record and one with another AppHost's record are
+  refused, and none is written into or deleted.
+- Two AppHosts, one root (IO, Concurrency): neither sees the other's `.incoming-*` or locks; sweeping from one leaves the
+  other's staging and lock alone; the owned directory holds `.gitignore` and the barrier files and the root does not.
+- `ScratchDirectory.SweepAbandoned` skips a reparse point named `.incoming-*` (IO).
+- Borrowing (IO, as the existing `ReferenceCheckout` tests): a home under the same root is found; origin mismatch still
+  refused; a home at another root or the default location falls back to a plain clone without error.
+- Messages: the three refusals name the setting for the default location and say to shorten it for an external one;
+  `GitPathLimitTests` figures for the default location are unchanged.
+- #519 interplay: a long external root still decides separate or refused by its real length.
+- **The ticket's own case** (cannot run on ubuntu CI), verified on the Windows dev box: an AppHost directory of about 145
+  characters, `ServiceSources__CheckoutsDirectory=C:\ss`, a managed service, and `dotnet run` of that service gets past the
+  point where the same AppHost without the setting fails with MSBuild "Path ... too long". Result recorded in the PR. A
+  Windows-only automated version (IO) builds a project at a checkout path over 260 characters only if it proves reliable.
+- `scripts/smoketest-config-layers.sh` gains a case for the new key.
 
 ## 7. Open Questions
 
-1. **Prepare markers.** Decision 3 says markers stay with the AppHost, but a managed checkout's marker is inside its own
-   git directory and moves with it (3.9). Is that acceptable, or should managed markers also move to
-   `.servicesources\prepare`? (Changing it would break "re-clone means re-prepare" unless keyed on checkout identity.)
-2. **Seeded relative values.** Should `PathOverrideCheck` warn when a seeded `servicesources.local.json` carries a relative
-   `checkoutsDirectory`, or is the docs recommendation of an absolute value enough (3.7)?
-3. **Hash length and keeping the `checkouts` segment.** 10 hex and `<hash>\checkouts\<name>` cost 22 characters of the
-   path; dropping the `checkouts` segment saves 10 at the price of name collisions with barrier files and staging
-   directories (3.1). Confirm the trade, or accept a different one.
-4. **Refusing an ancestor of the AppHost** (3.2) also refuses a root such as `C:\src` when the AppHost is under it,
-   which a developer might reasonably choose. The alternative is to allow it, since only `<hash>` is written; the cost is
-   hash directories appearing among their repositories. Keep the refusal?
-5. **Second borrowing candidate** (3.7) adds a lookup at the home's default location. Worth it, or only the same-root
-   candidate?
+1. **Hash length and the `checkouts` segment.** 10 hex and `<hash>\checkouts\<name>` cost 22 characters of working-tree
+   path. Dropping `checkouts` would save 10 but put barrier files and checkout names in one namespace. Confirm the trade.
+2. **Refusing an ancestor of the AppHost** (3.2) also refuses a root like `C:\src` when the AppHost is under it. The
+   alternative is to allow it, since only `<hash>` is written; the cost is hash directories among the developer's
+   repositories. Keep the refusal?
+3. **Relative values refused** (3.2). The alternative (resolve against the AppHost) gives every worktree a different place
+   and defeats the purpose in a deep AppHost. Confirm.
+4. **Extras left out as beyond the ticket:** borrowing from a home that used the default location (the migration case), and
+   a runtime notice when old checkouts remain under `.servicesources\checkouts`. Both are small and could follow if wanted.
