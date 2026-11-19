@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Git;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -288,4 +289,37 @@ public class SourceRequirementsTests
     [Fact]
     public void Path_IsNotASwitchRemedy() =>
         Assert.False(new PathSource().IsSwitchRemedy);
+
+    private static LocalProjectSource Repository() => new(new GitCliClient());
+
+    [Fact]
+    public void Repository_NoRepositoryToClone_ProblemIsNonAskable_NotOffered()
+    {
+        var requirements = Repository().Requirements(Input(Definition(repository: null)));
+
+        Assert.Equal("repository:url", requirements.Problem?.MissingSetting);
+        Assert.Empty(requirements.Fields);
+        Assert.False(requirements.Offered);
+    }
+
+    [Fact]
+    public void Repository_WithRepository_ResolvesWithNoFields()
+    {
+        var requirements = Repository().Requirements(Input(Definition()));
+
+        Assert.Empty(requirements.Fields);
+        Assert.True(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Repository_RepositoryPathOverride_Resolves()
+    {
+        var config = new ServiceDeveloperConfig { Repository = new() { Path = "existing-checkout" } };
+
+        Assert.True(Repository().Requirements(Input(Definition(repository: null), config)).Resolves);
+    }
+
+    [Fact]
+    public void Repository_IsNotASwitchRemedy() =>
+        Assert.False(Repository().IsSwitchRemedy);
 }

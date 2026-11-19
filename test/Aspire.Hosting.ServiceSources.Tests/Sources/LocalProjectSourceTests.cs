@@ -1830,6 +1830,21 @@ public class LocalProjectSourceTests
         TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     [Fact]
+    public void Requirements_ProblemMessage_EqualsWhatResolveThrows()
+    {
+        var source = new LocalProjectSource(new FakeGitClient());
+        var definition = RepositorylessDefinition();
+        var config = DevConfig();
+
+        var problem = source.Requirements(new SourceInput(ServiceName, definition, config, "apphost")).Problem;
+        var thrown = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            source.Resolve(PlainBuilder(), ServiceName, definition, config));
+
+        Assert.NotNull(problem);
+        Assert.Equal(thrown.Message, problem.Message);
+    }
+
+    [Fact]
     public void Resolve_LocalOnEntryDeclaringOnlyUrl_ThrowsNamingTheServiceAndTheCatalogThatDeclaresIt()
     {
         var gitClient = new FakeGitClient();

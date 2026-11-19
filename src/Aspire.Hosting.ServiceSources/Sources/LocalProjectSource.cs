@@ -15,17 +15,27 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <paramref name="gitClient"/> gives cloning.
 /// </param>
 internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRunner? prepareRunner = null)
-    : IServiceSource
+    : ServiceSource<NoValues>, IServiceSource
 {
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
 
-    public IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
+    public override bool IsSwitchRemedy => false;
+
+    protected override IReadOnlyList<FollowUpField> FieldsFor(ServiceDefinition definition) => [];
+
+    // Ahead of everything in Build, EnsureAvailable included, because it is the one check that can
+    // say this service has nothing to clone at all — and a cold clone is what the answer saves.
+    protected override NoValues Check(SourceInput input)
     {
-        // Ahead of everything below, EnsureAvailable included, because it is the one check that can
-        // say this service has nothing to clone at all — and a cold clone is what the answer saves.
-        RequireRepositoryToCheckOut(serviceName, definition, config);
+        RequireRepositoryToCheckOut(input.ServiceName, input.Definition, input.Config);
+
+        return default;
+    }
+
+    protected override IResourceBuilder<ServiceResource> Build(
+        IDistributedApplicationBuilder builder, SourceInput input, NoValues checkedValues)
+    {
+        var (serviceName, definition, config, _, repositoryConfig) = input;
 
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
@@ -348,7 +358,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
             + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or {PathSourceRemedy(serviceKey, definition)} "
-            + $"{SourceSwitchRemedy(serviceKey, definition, config)}{WhereTheSourceCanBeSet(serviceName)}");
+            + $"{SourceSwitchRemedy(serviceKey, definition, config)}{WhereTheSourceCanBeSet(serviceName)}")
+            .AsMissingSetting("repository:url");
     }
 
     /// <summary>
@@ -530,7 +541,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
     }
 
-    public bool IsOfferedFor(ServiceDefinition definition) => LocalGitCheckout.HasRepositoryToClone(definition);
+    public bool IsOfferedFor(ServiceDefinition definition) =>
+        Requirements(new SourceInput("", definition, new ServiceDeveloperConfig(), "")).Offered;
 
     /// <remarks>
     /// Always answers: a developer's own <c>repository.path</c> makes <c>"repository"</c> selectable
