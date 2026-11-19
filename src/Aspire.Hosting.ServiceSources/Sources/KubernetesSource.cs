@@ -92,18 +92,12 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : ServiceSo
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Kubernetes is null ? null : typeof(ServiceExecutableResource);
 
-    public bool IsOfferedFor(ServiceDefinition definition) =>
-        Requirements(new SourceInput("", definition, new ServiceDeveloperConfig(), "")).Offered;
-
     /// <summary>
     /// Whether the entry names a kubernetes service to forward to: the one precondition
     /// <see cref="RequireKubernetesBlock"/> enforces, written once.
     /// </summary>
     internal static bool HasService(ServiceDefinition definition) =>
         !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
-
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        Requirements(new SourceInput("", definition, config, "")).Resolves;
 
     internal static string[] BuildPortForwardArgs(
         string serviceName,

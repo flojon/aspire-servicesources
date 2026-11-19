@@ -544,9 +544,6 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
     }
 
-    public bool IsOfferedFor(ServiceDefinition definition) =>
-        Requirements(new SourceInput("", definition, new ServiceDeveloperConfig(), "")).Offered;
-
     /// <remarks>
     /// Always answers: a developer's own <c>repository.path</c> makes <c>"repository"</c> selectable
     /// even for an entry with no repository.

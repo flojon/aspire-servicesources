@@ -51,12 +51,6 @@ internal sealed class ContainerSource : ServiceSource<ContainerChecked>, IServic
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Container is null ? null : typeof(ServiceContainerResource);
 
-    public bool IsOfferedFor(ServiceDefinition definition) =>
-        Requirements(new SourceInput("", definition, new ServiceDeveloperConfig(), "")).Offered;
-
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        Requirements(new SourceInput("", definition, config, "")).Resolves;
-
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
