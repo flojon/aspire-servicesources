@@ -49,6 +49,42 @@ public class KubernetesSourceTests
             Kubernetes = new() { Context = context, Namespace = @namespace, Port = port, Scheme = scheme },
         };
 
+    public static TheoryData<string?, int?, string?, string?, int?> RequirementsSamples => new()
+    {
+        { "orders-svc", 8080, null, null, null },
+        { "orders-svc", 8080, null, "dev", null },
+        { "orders-svc", null, null, "dev", null },
+        { "orders-svc", null, null, "dev", 9090 },
+        { "orders-svc", 8080, "ftp", "dev", null },
+        { "orders-svc", 8080, null, "dev", 70000 },
+        { null, null, null, "dev", 9090 },
+    };
+
+    [Theory]
+    [MemberData(nameof(RequirementsSamples))]
+    public void Requirements_ProblemMessage_EqualsWhatResolveThrows_AndResolvesIffResolveReturns(
+        string? service, int? catalogPort, string? scheme, string? context, int? port)
+    {
+        var definition = Definition(service, catalogPort, scheme);
+        var config = DevConfig(context: context, port: port);
+        var source = new KubernetesSource(new FakePortAllocator(54321));
+        var directory = TempDirectories.CreateSubdirectory().FullName;
+
+        var requirements = source.Requirements(new SourceInput(ServiceName, definition, config, directory));
+
+        if (requirements.Problem is { } problem)
+        {
+            var thrown = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+                source.Resolve(TestHelpers.CreateBuilder(directory), ServiceName, definition, config));
+
+            Assert.Equal(thrown.Message, problem.Message);
+        }
+        else
+        {
+            Assert.NotNull(source.Resolve(TestHelpers.CreateBuilder(directory), ServiceName, definition, config));
+        }
+    }
+
     [Fact]
     public void BuildPortForwardArgs_AllFieldsSet_BuildsArgsInOrder()
     {

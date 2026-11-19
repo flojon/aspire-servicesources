@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -139,4 +140,103 @@ public class SourceRequirementsTests
     [Fact]
     public void Container_IsASwitchRemedy() =>
         Assert.True(new ContainerSource().IsSwitchRemedy);
+
+    private sealed class CountingAllocator : IPortAllocator
+    {
+        public int Calls { get; private set; }
+
+        public bool IsAvailable(int candidate) => true;
+
+        public int AllocatePort()
+        {
+            Calls++;
+            return 54321;
+        }
+
+        public IReadOnlyList<int> AllocatePorts(int count) => throw new NotSupportedException();
+    }
+
+    private static KubernetesSource Kubernetes() => new(new CountingAllocator());
+
+    private static ServiceDeveloperConfig KubernetesConfig(string? context = null, int? port = null) =>
+        new() { Kubernetes = new() { Context = context, Port = port } };
+
+    [Fact]
+    public void Kubernetes_WithoutCatalogPort_AsksContextPortNamespaceScheme() =>
+        Assert.Equal(
+            [("kubernetes:context", true), ("kubernetes:port", true), ("kubernetes:namespace", false), ("kubernetes:scheme", false)],
+            Keys(Kubernetes().Requirements(Input(Definition(kubernetesService: "orders")))));
+
+    [Fact]
+    public void Kubernetes_WithCatalogPort_DoesNotAskPort() =>
+        Assert.Equal(
+            [("kubernetes:context", true), ("kubernetes:namespace", false), ("kubernetes:scheme", false)],
+            Keys(Kubernetes().Requirements(Input(Definition(kubernetesService: "orders", kubernetesPort: 80)))));
+
+    [Fact]
+    public void Kubernetes_PortIsNumberInput_OthersText()
+    {
+        var fields = Kubernetes().Requirements(Input(Definition(kubernetesService: "orders"))).Fields;
+
+        Assert.Equal(InputType.Number, fields.Single(f => f.Key == "kubernetes:port").InputType);
+        Assert.All(fields.Where(f => f.Key != "kubernetes:port"), f => Assert.Equal(InputType.Text, f.InputType));
+    }
+
+    [Fact]
+    public void Kubernetes_EmptyConfig_ProblemIsMissingContext_Offered()
+    {
+        var requirements = Kubernetes().Requirements(Input(Definition(kubernetesService: "orders", kubernetesPort: 80)));
+
+        Assert.Equal("kubernetes:context", requirements.Problem?.MissingSetting);
+        Assert.True(requirements.Offered);
+    }
+
+    [Fact]
+    public void Kubernetes_NoServiceName_ProblemIsNonAskable_NotOffered()
+    {
+        var requirements = Kubernetes().Requirements(Input(Definition()));
+
+        Assert.Equal("kubernetes:service", requirements.Problem?.MissingSetting);
+        Assert.False(requirements.Offered);
+    }
+
+    [Fact]
+    public void Kubernetes_UnsupportedCatalogScheme_NotOffered()
+    {
+        var requirements = Kubernetes().Requirements(
+            Input(Definition(kubernetesService: "orders", kubernetesPort: 80, kubernetesScheme: "ftp")));
+
+        Assert.Null(requirements.Problem?.MissingSetting);
+        Assert.False(requirements.Offered);
+    }
+
+    [Fact]
+    public void Kubernetes_ContextAndPortGiven_Resolves() =>
+        Assert.True(Kubernetes().Requirements(
+            Input(Definition(kubernetesService: "orders"), KubernetesConfig("dev", 8080))).Resolves);
+
+    [Fact]
+    public void Kubernetes_PortOutOfRange_ProblemIsUntagged()
+    {
+        var requirements = Kubernetes().Requirements(
+            Input(Definition(kubernetesService: "orders"), KubernetesConfig("dev", 70000)));
+
+        Assert.NotNull(requirements.Problem);
+        Assert.Null(requirements.Problem.MissingSetting);
+    }
+
+    [Fact]
+    public void Kubernetes_Requirements_NeverAllocatesAPort()
+    {
+        var allocator = new CountingAllocator();
+
+        new KubernetesSource(allocator).Requirements(
+            Input(Definition(kubernetesService: "orders", kubernetesPort: 80), KubernetesConfig("dev")));
+
+        Assert.Equal(0, allocator.Calls);
+    }
+
+    [Fact]
+    public void Kubernetes_IsASwitchRemedy() =>
+        Assert.True(Kubernetes().IsSwitchRemedy);
 }
