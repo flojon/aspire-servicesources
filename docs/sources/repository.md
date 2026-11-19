@@ -887,8 +887,9 @@ other's checkouts, staging directories or lock files. The tool writes its `.giti
 - **A `<hash>` directory this tool did not create is refused**, not adopted: a file, a link, or a
   directory with no `owner.json` or one naming another AppHost stops with an error naming the
   directory. Delete it, or point the setting elsewhere.
-- **Do not point it at a directory other users can write to.** A checkout is code that is built and
-  run.
+- **The directory must be private to the current user.** A checkout is code that is built and run.
+  `owner.json` records which AppHost owns a `<hash>` directory, but it does not prove who created it,
+  so a root other users can write to is not safe.
 - **Existing checkouts are not moved or used.** Changing the setting leaves what is under
   `.servicesources/checkouts` where it is; delete it or move it yourself.
 - **`selection.json` and `path`-checkout `prepare` markers stay under the AppHost's

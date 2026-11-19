@@ -29,8 +29,8 @@ never existed. Check the tag of the last release before adding one.
   ([#475]). Set it to an absolute local directory such as `C:\ss`, through the configuration key, the
   environment variable `ServiceSources__CheckoutsDirectory`, or `"checkoutsDirectory"` in
   `servicesources.local.json`. Checkouts then live at `<directory>\<hash>\checkouts\<name>`, where the hash
-  of the AppHost path keeps AppHosts that share the directory apart; a deep AppHost no longer pushes its
-  checkouts past what MSBuild and git for Windows accept. The default stays
+  of the AppHost path keeps AppHosts that share the directory apart, and a shorter root gives a deep
+  AppHost room under the Windows path limit (not yet measured on a real deep AppHost). The default stays
   `<AppHost>\.servicesources\checkouts`, nothing is moved, and the path-too-long errors now suggest the
   setting. See [Placing checkouts outside the AppHost
   directory](docs/sources/repository.md#placing-checkouts-outside-the-apphost-directory).
