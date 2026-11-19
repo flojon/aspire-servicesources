@@ -52,9 +52,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </para>
 /// <para>
 /// Endpoints are the one thing deferral cannot preserve: they are synthesised from the launch
-/// profile's <c>applicationUrl</c> while composing, and nothing re-runs that step later. Rather
-/// than demand a declaration up front and refuse to run without one — which a run-to-completion
-/// worker, whose profile has no <c>applicationUrl</c> on either path, cannot satisfy honestly —
+/// profile's <c>applicationUrl</c> or <c>Kestrel:Endpoints</c> configuration while composing, and
+/// nothing re-runs that step later. Rather than demand a declaration up front and refuse to run
+/// without one — which a run-to-completion worker, with neither on either path, cannot satisfy honestly —
 /// the divergence is checked against the repository's real launch profile once the checkout has
 /// landed, and reported then. See <see cref="LaunchProfileEndpointWarning"/>.
 /// </para>
@@ -692,7 +692,11 @@ internal sealed class DeferredCheckout
         // Endpoints are the one part that cannot be put back, so the shortfall is reported
         // rather than enforced: refusing to start a service that would have run fine is worse
         // than telling the developer their port is not Aspire's to manage.
-        if (LaunchProfileEndpointWarning(resource.Name, profile, resource) is { } warning)
+        IReadOnlyList<string> kestrelUrls = resource.Annotations.OfType<EndpointAnnotation>().Any()
+            ? []
+            : LandedKestrelEndpoints.Read(projectFile, LandedKestrelEndpoints.ProcessEnvironment());
+
+        if (LaunchProfileEndpointWarning(resource.Name, profile, resource, kestrelUrls) is { } warning)
         {
             ServiceSourcesLog.Warning(logger, $"{warning}");
         }
@@ -768,13 +772,14 @@ internal sealed class DeferredCheckout
 
     /// <summary>
     /// The warning for a deferred service whose landed launch profile declares an
-    /// <c>applicationUrl</c> that the AppHost did not mirror as an endpoint, or
+    /// <c>applicationUrl</c>, or whose configuration declares a Kestrel endpoint, that the AppHost did
+    /// not mirror as an endpoint, or
     /// <see langword="null"/> when there is nothing to say. Exposed for tests.
     /// </summary>
     /// <remarks>
     /// <para>
     /// This is the whole of what deferral costs, stated at the only moment it can be stated
-    /// accurately. Endpoints are synthesised from <c>applicationUrl</c> while composing, when the
+    /// accurately. Endpoints are synthesised from <c>applicationUrl</c> or Kestrel configuration while composing, when the
     /// repository is not on disk; nothing re-runs that step, so a deferred resource carries only
     /// the endpoints the AppHost declared. If the project turns out to declare none either, that
     /// agrees with the warm path exactly and there is nothing wrong — which is the case a
@@ -791,14 +796,19 @@ internal sealed class DeferredCheckout
     /// </para>
     /// </remarks>
     public static Raw? LaunchProfileEndpointWarning(
-        string serviceName, LandedLaunchProfile profile, IResource resource)
+        string serviceName, LandedLaunchProfile profile, IResource resource,
+        IReadOnlyList<string>? kestrelUrls = null)
     {
         if (resource.Annotations.OfType<EndpointAnnotation>().Any())
         {
             return null;
         }
 
-        var declared = profile.ApplicationUrls;
+        // Aspire ignores applicationUrl once any Kestrel endpoint is configured, so only one source applies.
+        var fromKestrel = kestrelUrls is { Count: > 0 };
+        var declared = (fromKestrel ? kestrelUrls! : profile.ApplicationUrls)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (declared.Count == 0)
         {
             return null;
@@ -809,15 +819,30 @@ internal sealed class DeferredCheckout
         // fact this warning exists to report.
         var urls = Raw.Join(", ", declared.Select(Raw.Escaped));
 
+        // Aspire names the endpoint after its scheme, so an https URL needs WithHttpsEndpoint, not a stray http one.
+        var anyHttps = declared.Any(u => u.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        var anyHttp = declared.Any(u => !u.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        var calls = (anyHttp, anyHttps) switch
+        {
+            (true, true) => Raw.Literal(".WithHttpEndpoint().WithHttpsEndpoint()"),
+            (false, true) => Raw.Literal(".WithHttpsEndpoint()"),
+            _ => Raw.Literal(".WithHttpEndpoint()"),
+        };
+
+        var source = fromKestrel
+            ? Raw.Compose($"its appsettings Kestrel:Endpoints configuration declares '{urls}'")
+            : Raw.Compose($"its launch profile declares applicationUrl '{urls}'");
+
         return Raw.Compose(
-            $"Service '{new Name(serviceName)}' was started from a checkout cloned during this run, and its launch "
-            + $"profile declares applicationUrl '{urls}' — but a project's endpoints are "
+            $"Service '{new Name(serviceName)}' was started from a checkout cloned during this run, and "
+            + $"{source}"
+            + $" — but a project's endpoints are "
             + $"read while the AppHost composes, before the repository was on disk, so Aspire allocated none. "
             + $"The project will bind that URL itself and run, but the port is outside Aspire's management: it "
             + $"is not moved off a collision, nothing proxies it, service discovery cannot resolve this service "
             + $"and the dashboard will not link it. Declare it in the AppHost — builder.AddService(\"{new Name(serviceName)}\")"
-            + $".WithHttpEndpoint() — which also takes effect on every later run, where the checkout is warm and "
-            + $"the endpoint comes from the profile as usual. This is reported after the clone rather than "
+            + $"{calls} — which also takes effect on every later run, where the checkout is warm and "
+            + $"the endpoint comes from the project's own configuration as usual. This is reported after the clone rather than "
             + $"refused before it, so a service that has no endpoints on either path costs you nothing.");
     }
 

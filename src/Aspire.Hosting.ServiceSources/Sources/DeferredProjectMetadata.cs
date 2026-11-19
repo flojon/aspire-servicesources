@@ -30,7 +30,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// name is verified against the repository once the clone has landed.
 /// </para>
 /// <para>
-/// What is lost either way is endpoints. Those are synthesised from <c>applicationUrl</c> during
+/// What is lost either way is endpoints. Those are synthesised from <c>applicationUrl</c> or <c>Kestrel:Endpoints</c> during
 /// composition, when the repository is not on disk, and nothing re-runs that step later — which is
 /// why <see cref="DeferredCheckout"/> compares the landed launch profile against the endpoints the
 /// AppHost declared and warns about the difference, rather than refusing a service that declared

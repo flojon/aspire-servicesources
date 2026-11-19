@@ -548,14 +548,23 @@ var orders = builder.AddService("orders").WithHttpEndpoint();
 ```
 
 You are not asked for that line up front, and a service that doesn't need it isn't refused — a
-run-to-completion worker has no `applicationUrl` on either path, so demanding one would mean
-declaring an endpoint it never listens on. Instead the real launch profile is read once the
-checkout lands and the shortfall is reported then, quoting the `applicationUrl` it actually
-found: the project still binds that URL itself and runs, but Aspire allocated no endpoint, so
+run-to-completion worker has no `applicationUrl` or Kestrel endpoint on either path, so demanding one
+would mean declaring an endpoint it never listens on. Instead the real launch profile and Kestrel
+configuration are read once the checkout lands and the shortfall is reported then, quoting the URL it
+actually found: the project still binds that URL itself and runs, but Aspire allocated no endpoint, so
 the port isn't moved off a collision, nothing proxies it, service discovery can't resolve the
 service and the dashboard won't link it. Add the line and the next run is whole; it is correct
 on a warm checkout too, where it updates the endpoint the profile already created rather than
 adding one.
+
+Endpoints configured under `Kestrel:Endpoints` follow the same rule. On a warm checkout Aspire turns them
+into endpoints itself, with or without a launch profile, and ignores the profile's `applicationUrl` when
+any exist. On a deferred first checkout the files aren't on disk while the AppHost composes, so none are
+created; once the checkout lands the warning reads `Kestrel:Endpoints:*:Url` from `appsettings.json`,
+`appsettings.{Environment}.json`, `{ProjectDirectory}.settings.json` and
+`{ProjectDirectory}.settings.{Environment}.json`, the same files Aspire reads. The environment is the
+AppHost's own `ASPNETCORE_ENVIRONMENT`, else `DOTNET_ENVIRONMENT`; with neither set only the base files
+apply. The fix is the same endpoint declaration.
 
 Scoped deliberately narrowly, so the blast radius is first-run-only (plus that one changed-command run):
 

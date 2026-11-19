@@ -58,6 +58,12 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **A deferred `dotnet` service whose endpoints come from `Kestrel:Endpoints` now gets the same post-clone
+  endpoint warning as one using `applicationUrl`** ([#398]). Aspire reads both while composing, so a cold
+  checkout carries neither; the warning now also reads `Kestrel:Endpoints:*:Url` from the landed
+  `appsettings` files, using the AppHost's own environment as Aspire does, and quotes what it found. Warm checkouts are
+  unchanged: Aspire turns Kestrel endpoints into endpoints itself.
+
 - **Several `"path"` services that resolve to one directory now run an identical `prepare` step once, not once per
   service** ([#446]). Identical means the same directory, command and `mode`; a different command or mode
   still runs on its own. It applies to a redirected group's members and to services sharing one `path.path`,
@@ -2217,6 +2223,7 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
+[#398]: https://github.com/flojon/aspire-servicesources/issues/398
 [#399]: https://github.com/flojon/aspire-servicesources/issues/399
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
 [#481]: https://github.com/flojon/aspire-servicesources/issues/481
