@@ -2,8 +2,8 @@
 
   <!--
     Adds net11.0 to every multi-targeted project when IncludeNet11Preview is set, which is how
-    net11-preview.yml compiles and tests against the preview framework itself rather than only
-    building the shipped frameworks under a preview SDK.
+    aspire-matrix.yml compiles and tests against net11.0 itself rather than only
+    building the shipped frameworks under the newer SDK.
 
     Off by default, so the TargetFrameworks that pack and publish read are the shipped ones and
     nothing here reaches a released package.
