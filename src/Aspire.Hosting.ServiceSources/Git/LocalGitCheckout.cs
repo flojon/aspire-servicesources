@@ -26,11 +26,11 @@ internal static class LocalGitCheckout
     /// <see cref="ReconcileRepoRoot"/> — which the prefetch calls only for the services the AppHost
     /// actually adds (see <see cref="Sources.LocalCheckoutPrefetch"/>).
     /// </remarks>
-    public readonly record struct PreparedCheckout(string RepoRoot, bool NeedsReconciliation);
+    public readonly record struct PreparedCheckout(string RepoRoot, bool NeedsReconciliation, CheckoutsLocation Location);
 
     /// <summary>
     /// Where a package-managed checkout of <paramref name="checkoutName"/> lives. A pure function of
-    /// the checkout name and the AppHost directory — no filesystem access, no network — so a caller
+    /// the checkout name and the checkouts location — no filesystem access, no network — so a caller
     /// can name the path before the clone that fills it has happened.
     /// </summary>
     /// <remarks>
@@ -50,7 +50,7 @@ internal static class LocalGitCheckout
     /// <paramref name="checkoutName"/> is not a directory name of its own, and so names a location
     /// this package does not own. See <see cref="IsContainedCheckoutDirectoryName"/>.
     /// </exception>
-    public static string ManagedRepoRoot(string appHostDirectory, string checkoutName)
+    public static string ManagedRepoRoot(CheckoutsLocation location, string checkoutName)
     {
         if (!IsContainedCheckoutDirectoryName(checkoutName))
         {
@@ -60,7 +60,7 @@ internal static class LocalGitCheckout
                 $"{ContainedNameRuleAndRemedy}");
         }
 
-        return Path.Combine(ToolDirectory.PathIn(appHostDirectory), CheckoutsDirectoryName, checkoutName);
+        return Path.Combine(location.CheckoutsRoot, checkoutName);
     }
 
     /// <summary>
@@ -99,10 +99,10 @@ internal static class LocalGitCheckout
     /// developer configuration it is a raw key that nothing has looked at. From
     /// <see cref="Catalog.ServiceCatalogBuilder.AddService"/> it is likewise a raw string parameter
     /// with no analyzer attached — as unchecked as the developer configuration's key. Whichever way
-    /// it arrived, the value is combined into <c>.servicesources/checkouts/</c> first, so a name
+    /// it arrived, the value is combined into the checkouts directory first, so a name
     /// containing <c>..</c> clones
     /// outside the directory that the ignore file and the <see cref="CheckoutBuildBarrier"/> files
-    /// <c>EnsureToolDirectory</c> writes exist to cover — which puts the checkout back into the
+    /// <see cref="CheckoutsLocation.EnsureOwned"/> writes exist to cover — which puts the checkout back into the
     /// AppHost's source-control status and inside its build settings (#224).
     /// </para>
     /// <para>
@@ -257,9 +257,11 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     public static bool IsColdManagedCheckout(
-        string appHostDirectory, string checkoutName, ServiceDeveloperConfig config) =>
+        CheckoutsLocation location, string checkoutName, ServiceDeveloperConfig config) =>
         IsManagedCheckout(config)
-        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, checkoutName));
+        // A bad setting is reported by whoever is about to act on it, never by this question.
+        && location.Problem is null
+        && !Directory.Exists(ManagedRepoRoot(location, checkoutName));
 
     /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already
@@ -278,13 +280,14 @@ internal static class LocalGitCheckout
         ServiceDeveloperConfig config,
         RepositoryDeveloperConfig? repositoryConfig,
         string appHostDirectory,
+        CheckoutsLocation location,
         IGitClient gitClient) =>
         ReconcileRepoRoot(
             serviceName,
             definition,
             config,
             repositoryConfig,
-            PrepareRepoRoot(serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient),
+            PrepareRepoRoot(serviceName, definition, config, repositoryConfig, appHostDirectory, location, gitClient),
             gitClient);
 
     /// <summary>
@@ -319,6 +322,7 @@ internal static class LocalGitCheckout
         ServiceDeveloperConfig config,
         RepositoryDeveloperConfig? repositoryConfig,
         string appHostDirectory,
+        CheckoutsLocation location,
         IGitClient gitClient,
         IGitProgressSink? progress = null,
         Func<string?>? homeAppHostDirectory = null,
@@ -356,18 +360,18 @@ internal static class LocalGitCheckout
             // Used as-is: no clone, no checkout, no fetch, ever.
             return new PreparedCheckout(
                 ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "repository.path", config.Repository.Path, appHostDirectory),
-                NeedsReconciliation: false);
+                NeedsReconciliation: false,
+                location);
         }
 
-        EnsureToolDirectory(appHostDirectory);
-        var repoRoot = ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName);
-        var checkoutsRoot = Path.GetDirectoryName(repoRoot)!;
+        location.EnsureOwned();
+        var repoRoot = ManagedRepoRoot(location, definition.Repository.CheckoutName);
         var layoutOptions = layout ?? CloneLayoutOptions.Default;
 
         if (ManagedGitDirectory.Resolve(repoRoot, layoutOptions.GitRoot).GitDirectory is not null)
         {
             // A working tree from an earlier run, or a developer's own. Untouched here.
-            return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
+            return new PreparedCheckout(repoRoot, NeedsReconciliation: true, location);
         }
 
         // Everything above resolves a directory; from here on a clone happens, and a clone needs a
@@ -384,9 +388,9 @@ internal static class LocalGitCheckout
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, homeAppHostDirectory, gitClient, progress, layoutOptions))
+        if (CloneIntoPlace(label, definition, location, repoRoot, homeAppHostDirectory, gitClient, progress, layoutOptions))
         {
-            return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
+            return new PreparedCheckout(repoRoot, NeedsReconciliation: true, location);
         }
 
         // Our own clone, seconds old and holding nothing anyone could lose, so it is put on the
@@ -396,7 +400,7 @@ internal static class LocalGitCheckout
             CheckoutWithFetchRetry(label, definition, repoRoot, reference, gitClient);
         }
 
-        return new PreparedCheckout(repoRoot, NeedsReconciliation: false);
+        return new PreparedCheckout(repoRoot, NeedsReconciliation: false, location);
     }
 
     /// <summary>
@@ -416,7 +420,7 @@ internal static class LocalGitCheckout
     {
         if (prepared.NeedsReconciliation)
         {
-            NoteExistingCheckout(prepared.RepoRoot, layout ?? CloneLayoutOptions.Default, notice);
+            NoteExistingCheckout(prepared.RepoRoot, prepared.Location, layout ?? CloneLayoutOptions.Default, notice);
             UseExistingCheckout(
                 serviceName, definition, prepared.RepoRoot,
                 ConfiguredReference(definition, config, repositoryConfig), gitClient);
@@ -429,7 +433,8 @@ internal static class LocalGitCheckout
     /// Keeps a separate git directory in use from being swept, and says so when an in-place checkout
     /// is too deep to be maintained, which this tool never fixes by moving a working checkout.
     /// </summary>
-    private static void NoteExistingCheckout(string repoRoot, CloneLayoutOptions layout, Action<Raw>? notice)
+    private static void NoteExistingCheckout(
+        string repoRoot, CheckoutsLocation location, CloneLayoutOptions layout, Action<Raw>? notice)
     {
         if (Directory.Exists(Path.Combine(repoRoot, ".git")))
         {
@@ -437,7 +442,7 @@ internal static class LocalGitCheckout
                 && Path.GetFullPath(repoRoot).Length > GitPathLimit.MaxInPlaceRoot(layout.GitDirLimit))
             {
                 notice?.Invoke(Raw.Compose(
-                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows: every git command in it fails with \"'$GIT_DIR' too big\". It is not moved. If it has local changes or unpushed commits, move '{Raw.Display(Path.Combine(CheckoutsDirectoryName, Path.GetFileName(repoRoot)))}' out of the AppHost's '.servicesources' directory; otherwise delete it. Then re-run to have it cloned again with a short separate git directory. This needs an AppHost path short enough for the working tree itself (about {GitPathLimit.MaxSeparateAppHostLength} characters, less for a long checkout name); beyond that, move the AppHost to a shorter path."));
+                    $"The checkout at '{Raw.Display(repoRoot)}' keeps its git directory inside it, and its path is too deep for git for Windows: every git command in it fails with \"'$GIT_DIR' too big\". It is not moved. If it has local changes or unpushed commits, move '{Raw.Display(repoRoot)}' out of '{Raw.Display(location.CheckoutsRoot)}'; otherwise delete it. Then re-run to have it cloned again with a short separate git directory. {GitPathLimit.ExistingCheckoutRemedy(location)}"));
             }
 
             return;
@@ -532,7 +537,7 @@ internal static class LocalGitCheckout
     private static bool CloneIntoPlace(
         Raw label,
         ServiceDefinition definition,
-        string checkoutsRoot,
+        CheckoutsLocation location,
         string repoRoot,
         Func<string?>? homeAppHostDirectory,
         IGitClient gitClient,
@@ -542,6 +547,7 @@ internal static class LocalGitCheckout
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
+        var checkoutsRoot = location.CheckoutsRoot;
         Directory.CreateDirectory(checkoutsRoot);
         ScratchDirectory.SweepAbandoned(checkoutsRoot, progress, layout.GitRoot);
 
@@ -564,12 +570,12 @@ internal static class LocalGitCheckout
             throw GitFileRefusal(label, repoRoot, existing.Refusal);
         }
 
-        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress, layout.GitRoot);
+        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, location, definition, gitClient, progress, layout.GitRoot);
         var scratch = ScratchDirectory.Create(checkoutsRoot);
 
         try
         {
-            var separate = CloneLayout.Decide(label, repoRoot, scratch.Path, layout) == CloneLayoutKind.Separate;
+            var separate = CloneLayout.Decide(label, repoRoot, scratch.Path, layout, location) == CloneLayoutKind.Separate;
             if (separate)
             {
                 SeparateGitDirectories.SweepOrphans(layout.GitRoot!, DateTimeOffset.UtcNow, progress);
@@ -646,7 +652,7 @@ internal static class LocalGitCheckout
             }
 
             // Debris from a version that predates this method, or from a crash before the rename
-            // below. Everything under .servicesources is tool-managed and gitignored, and a
+            // below. Everything under an owned directory is tool-managed and gitignored, and a
             // checkout with no ".git" entry holds nothing worth keeping.
             if (Directory.Exists(repoRoot))
             {
@@ -806,30 +812,16 @@ internal static class LocalGitCheckout
     }
 
     /// <summary>
-    /// Creates the tool-owned <c>.servicesources</c> directory a checkout is about to land under,
-    /// and the <see cref="CheckoutBuildBarrier"/> that keeps the AppHost repository's build settings
-    /// out of the checkouts.
-    /// </summary>
-    /// <remarks>
-    /// The directory itself and its <c>.gitignore</c> belong to <see cref="ToolDirectory"/>, which a
-    /// <c>prepare</c> step's marker for a <c>path</c> checkout also reaches without ever cloning
-    /// anything. The barrier stays here: it is about the checkouts, so nothing that is not going to
-    /// clone one should write it.
-    /// </remarks>
-    private static void EnsureToolDirectory(string appHostDirectory) =>
-        CheckoutBuildBarrier.Ensure(ToolDirectory.Ensure(appHostDirectory));
-
-    /// <summary>
     /// <see cref="ReferenceCheckout"/>, degraded to <see langword="null"/> by any failure: borrowing is an
     /// optimisation, and the home checkout is a directory this tool does not control.
     /// </summary>
     private static string? TryReferenceCheckout(
-        Func<string?>? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient, IGitProgressSink? progress,
-        string? gitRoot)
+        Func<string?>? homeAppHostDirectory, CheckoutsLocation location, ServiceDefinition definition,
+        IGitClient gitClient, IGitProgressSink? progress, string? gitRoot)
     {
         try
         {
-            return ReferenceCheckout(homeAppHostDirectory?.Invoke(), definition, gitClient, gitRoot);
+            return ReferenceCheckout(homeAppHostDirectory?.Invoke(), location, definition, gitClient, gitRoot);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -848,14 +840,22 @@ internal static class LocalGitCheckout
     /// from being borrowed from.
     /// </remarks>
     internal static string? ReferenceCheckout(
-        string? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient, string? gitRoot = null)
+        string? homeAppHostDirectory, CheckoutsLocation thisRun, ServiceDefinition definition, IGitClient gitClient,
+        string? gitRoot = null)
     {
         if (homeAppHostDirectory is null)
         {
             return null;
         }
 
-        var candidate = ManagedRepoRoot(homeAppHostDirectory, definition.Repository.CheckoutName);
+        // The home is found under this run's setting only: another worktree's configuration is not read.
+        var home = CheckoutsLocation.Resolve(homeAppHostDirectory, thisRun.ConfiguredValue);
+        if (home.Problem is not null)
+        {
+            return null;
+        }
+
+        var candidate = ManagedRepoRoot(home, definition.Repository.CheckoutName);
 
         return ManagedGitDirectory.Resolve(candidate, gitRoot).GitDirectory is not null
             && gitClient.GetOriginUrl(candidate) is { } origin

@@ -17,7 +17,7 @@ public class LocalGitCheckoutExistingSitesTests
     private static string HomeWith(Action<string> shape)
     {
         var home = TempDirectories.CreateSubdirectory().FullName;
-        var root = LocalGitCheckout.ManagedRepoRoot(home, "orders");
+        var root = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(home), "orders");
         Directory.CreateDirectory(root);
         shape(root);
         return home;
@@ -45,7 +45,7 @@ public class LocalGitCheckoutExistingSitesTests
         var home = HomeWith(root => File.WriteAllText(Path.Combine(root, ".git"), "gitdir: elsewhere"));
         var git = new ScriptedCloneGitClient { HomeOrigin = Url };
 
-        Assert.Null(LocalGitCheckout.ReferenceCheckout(home, Definition(Url), git, gitRoot: Path.GetTempPath()));
+        Assert.Null(LocalGitCheckout.ReferenceCheckout(home, CheckoutsLocation.Default(Path.GetTempPath()), Definition(Url), git, gitRoot: Path.GetTempPath()));
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class LocalGitCheckoutExistingSitesTests
         var home = HomeWith(root => File.WriteAllText(Path.Combine(root, ".git"), $"gitdir: {worktreeGitDirectory}\n"));
         var git = new ScriptedCloneGitClient { HomeOrigin = Url };
 
-        Assert.Null(LocalGitCheckout.ReferenceCheckout(home, Definition(Url), git, gitRoot: Path.GetTempPath()));
+        Assert.Null(LocalGitCheckout.ReferenceCheckout(home, CheckoutsLocation.Default(Path.GetTempPath()), Definition(Url), git, gitRoot: Path.GetTempPath()));
     }
 
     [Fact]
@@ -65,15 +65,15 @@ public class LocalGitCheckoutExistingSitesTests
         var git = new ScriptedCloneGitClient { HomeOrigin = Url };
 
         Assert.Equal(
-            LocalGitCheckout.ManagedRepoRoot(home, "orders"),
-            LocalGitCheckout.ReferenceCheckout(home, Definition(Url), git));
+            LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(home), "orders"),
+            LocalGitCheckout.ReferenceCheckout(home, CheckoutsLocation.Default(Path.GetTempPath()), Definition(Url), git));
     }
 
     private static string Reconcile(
         LocalGitCheckoutSeparateTests.Environment environment, IGitClient git, List<string>? notices = null, string url = Url) =>
         LocalGitCheckout.ReconcileRepoRoot(
             "orders", Definition(url), new() { Source = "repository" }, repositoryConfig: null,
-            new LocalGitCheckout.PreparedCheckout(environment.Checkout, NeedsReconciliation: true),
+            new LocalGitCheckout.PreparedCheckout(environment.Checkout, NeedsReconciliation: true, CheckoutsLocation.Default(Path.GetTempPath())),
             git, environment.Layout, notice: notice => notices?.Add(notice.ToString()));
 
     [Fact]
@@ -107,6 +107,27 @@ public class LocalGitCheckoutExistingSitesTests
         Assert.Contains("delete", notice, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(Path.Combine("checkouts", "orders"), notice, StringComparison.Ordinal);
         Assert.Contains("re-run", notice, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NoteExistingCheckout_names_the_actual_checkouts_directory_and_the_setting()
+    {
+        var temp = TempDirectories.CreateSubdirectory().FullName;
+        var layout = new CloneLayoutOptions(Path.Combine(temp, "gitroot"), IsWindows: true);
+        var location = CheckoutsLocation.Resolve(Path.Combine(temp, "apphost"), Path.Combine(temp, new string('a', 200)));
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(location, "orders");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+        var notices = new List<string>();
+
+        LocalGitCheckout.ReconcileRepoRoot(
+            "orders", Definition(Url), new() { Source = "repository" }, repositoryConfig: null,
+            new LocalGitCheckout.PreparedCheckout(repoRoot, NeedsReconciliation: true, location),
+            new ScriptedCloneGitClient(), layout, notice: notice => notices.Add(notice.ToString()));
+
+        var notice = Assert.Single(notices);
+        Assert.Contains($"out of '{location.CheckoutsRoot}'", notice, StringComparison.Ordinal);
+        Assert.Contains("ServiceSources:CheckoutsDirectory", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("move the AppHost", notice, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

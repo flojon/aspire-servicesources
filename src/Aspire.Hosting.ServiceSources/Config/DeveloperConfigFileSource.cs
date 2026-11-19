@@ -55,6 +55,9 @@ internal static class DeveloperConfigFileSource
     /// </remarks>
     internal const string FileRepositoryRootKey = "repositoryRoot";
 
+    /// <summary>The same, for the directory managed checkouts are placed in.</summary>
+    internal const string FileCheckoutsDirectoryKey = "checkoutsDirectory";
+
     /// <summary>
     /// Every subtree of the file that crosses into the AppHost's configuration, and the key it
     /// lands under.
@@ -78,6 +81,7 @@ internal static class DeveloperConfigFileSource
     private static readonly (string FileKey, string ConfigurationKey)[] ReRootedValues =
     [
         (FileRepositoryRootKey, DeveloperConfiguration.RepositoryRootKey),
+        (FileCheckoutsDirectoryKey, DeveloperConfiguration.CheckoutsDirectoryKey),
     ];
 
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, Registration> Registrations = new();

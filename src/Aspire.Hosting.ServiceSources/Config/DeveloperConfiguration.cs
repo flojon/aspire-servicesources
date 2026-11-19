@@ -34,6 +34,13 @@ internal sealed class DeveloperConfiguration
     /// </summary>
     public const string RepositoryRootKey = "ServiceSources:RepositoryRoot";
 
+    /// <summary>
+    /// The configuration key naming an absolute local directory to hold managed checkouts instead of
+    /// the AppHost's <c>.servicesources/checkouts</c>. Blank or unset means the default. See
+    /// <see cref="Git.CheckoutsLocation"/>.
+    /// </summary>
+    public const string CheckoutsDirectoryKey = "ServiceSources:CheckoutsDirectory";
+
     public const string FileName = "servicesources.local.json";
 
     public required IReadOnlyDictionary<string, ServiceDeveloperConfig> Services { get; init; }

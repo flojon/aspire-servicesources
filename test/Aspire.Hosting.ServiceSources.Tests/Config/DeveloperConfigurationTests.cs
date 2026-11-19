@@ -728,7 +728,7 @@ public class DeveloperConfigurationTests
 
         var prepared = LocalGitCheckout.PrepareRepoRoot(
             "blanking", new ServiceMetadata().ToDefinition("servicesources.yaml", "blanking", TestHelpers.EmptyRepositories),
-            config, null, dir, gitClient: null!);
+            config, null, dir, CheckoutsLocation.Default(dir), gitClient: null!);
 
         Assert.Equal(repoRoot, prepared.RepoRoot);
         Assert.NotEqual(dir, prepared.RepoRoot);

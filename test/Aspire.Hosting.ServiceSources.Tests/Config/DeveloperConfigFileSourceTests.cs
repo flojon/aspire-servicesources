@@ -167,6 +167,22 @@ public class DeveloperConfigFileSourceTests
         Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
+    [Fact]
+    public void CheckoutsDirectory_AtTheFilesRoot_IsReadableUnderItsConfigurationKey()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), OrdersCatalog);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "checkoutsDirectory": "/ss","services": { "orders": { "source": "repository" } } }""");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        Assert.Equal("/ss", builder.Configuration[DeveloperConfiguration.CheckoutsDirectoryKey]);
+        Assert.Equal("ServiceSources:CheckoutsDirectory", DeveloperConfiguration.CheckoutsDirectoryKey);
+    }
+
     /// <summary>
     /// Registration is the one thing every entry point does before anything else, so it happens even
     /// on the paths that then fail — a missing catalog is reported by <c>AddService()</c>, and the

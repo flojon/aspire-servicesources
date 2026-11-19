@@ -147,7 +147,7 @@ internal sealed class ScratchDirectory : IDisposable
         {
             foreach (var orphan in Directory.EnumerateFiles(checkoutsRoot, Prefix + "*" + LockSuffix))
             {
-                if (!Directory.Exists(orphan[..^LockSuffix.Length]))
+                if (!Directory.Exists(orphan[..^LockSuffix.Length]) && !IsReparsePoint(orphan))
                 {
                     SweepOrphanLock(orphan);
                 }
@@ -157,7 +157,8 @@ internal sealed class ScratchDirectory : IDisposable
             {
                 try
                 {
-                    if (SweepOne(directory))
+                    // A link is never followed: the checkouts root can sit where someone else can write.
+                    if (!IsReparsePoint(directory) && SweepOne(directory))
                     {
                         SweepPairedGitDirectory(gitRoot, System.IO.Path.GetFileName(directory)[Prefix.Length..]);
                         log?.Report(Raw.Compose(
@@ -175,6 +176,9 @@ internal sealed class ScratchDirectory : IDisposable
             // The enumeration itself failed, so there is nothing we can sweep.
         }
     }
+
+    private static bool IsReparsePoint(string path) =>
+        new FileInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint);
 
     // The id is spliced into a search pattern, so anything but the generated shape must not reach it.
     private static bool IsStagingId(string id) => id.Length == 8 && id.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'));
