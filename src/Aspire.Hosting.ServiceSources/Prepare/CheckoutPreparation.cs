@@ -194,11 +194,17 @@ internal static class CheckoutPreparation
         // commit the step really ran on rather than forced through one re-run to find out.
         if (step.Mode != PrepareMode.Always && markerPath is not null)
         {
-            PrepareMarker.Write(
+            var recorded = PrepareMarker.Write(
                 markerPath,
                 new PrepareMarker(step.CommandHash, commit, DateTime.UtcNow.ToString("O"), checkoutPath),
                 appHostDirectory,
                 managedCheckout);
+
+            if (!recorded)
+            {
+                sink.Report(Raw.Compose(
+                    $"{Tag(checkoutName)} Could not record that the prepare step completed; it will run again on the next start."));
+            }
         }
     }
 

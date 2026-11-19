@@ -152,7 +152,8 @@ internal sealed record PrepareMarker(
     /// and the rename is what keeps "an unreadable marker runs rather than throws" a fallback rather
     /// than a routine.
     /// </remarks>
-    public static void Write(
+    /// <returns>Whether the record landed; false means it was dropped and the step will run again.</returns>
+    public static bool Write(
         string markerPath, PrepareMarker marker, string appHostDirectory, bool managedCheckout)
     {
         var directory = System.IO.Path.GetDirectoryName(markerPath)!;
@@ -184,6 +185,7 @@ internal sealed record PrepareMarker(
 
             File.WriteAllText(scratch, JsonSerializer.Serialize(marker, SerializerOptions));
             MoveOntoMarker(scratch, markerPath);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -192,6 +194,7 @@ internal sealed record PrepareMarker(
             // What it costs is a step that runs again on the next start, which every mode's command
             // has to tolerate anyway.
             TryDelete(scratch);
+            return false;
         }
     }
 
