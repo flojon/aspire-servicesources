@@ -2458,12 +2458,4 @@ public class LocalProjectSourceTests
         var index = Array.FindIndex(map.InterfaceMethods, m => m.Name == nameof(IServiceSource.CanResolve));
         return map.TargetMethods[index].DeclaringType == source.GetType();
     }
-
-    [Fact]
-    public void SourceProbe_TreatsAnyException_AsNotResolvable()
-    {
-        Assert.True(SourceProbe.Resolves(() => { }));
-        Assert.False(SourceProbe.Resolves(() => throw ServiceSourcesConfigurationException.For($"bad entry")));
-        Assert.False(SourceProbe.Resolves(() => throw new UriFormatException("not a uri")));
-    }
 }

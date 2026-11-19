@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -35,6 +36,18 @@ internal interface IServiceSource
     /// source switch skipped. Answering too broadly only turns that throw into a warning.
     /// </remarks>
     Type? DeclaredResourceType(IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) => null;
+
+    /// <summary>
+    /// What this source needs before it resolves <paramref name="input"/>: the settings the picker must
+    /// still ask for, and the first reason <see cref="Resolve"/> would refuse the entry as it stands.
+    /// Runs the same check <see cref="Resolve"/> runs, with no side effect.
+    /// </summary>
+    SourceRequirements Requirements(SourceInput input);
+
+    /// <summary>
+    /// Whether an error message about another source may suggest switching to this one.
+    /// </summary>
+    bool IsSwitchRemedy { get; }
 
     /// <summary>
     /// Whether <paramref name="definition"/> declares what this source needs, so the interactive
