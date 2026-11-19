@@ -160,6 +160,19 @@ public class KestrelEndpointTests
         Assert.Equal(2, warning.Split("http://localhost:5200").Length);
     }
 
+    [Theory]
+    [InlineData("http://localhost:5200", ".WithHttpEndpoint()", ".WithHttpsEndpoint()")]
+    [InlineData("https://localhost:7001", ".WithHttpsEndpoint()", ".WithHttpEndpoint()")]
+    public void Warning_AdvisesTheEndpointCallMatchingTheUrlScheme(string url, string expected, string unexpected)
+    {
+        var warning = Warn(WriteProject(
+            "{ \"Kestrel\": { \"Endpoints\": { \"Web\": { \"Url\": \"" + url + "\" } } } }"));
+
+        Assert.NotNull(warning);
+        Assert.Contains(expected, warning);
+        Assert.DoesNotContain(unexpected, warning);
+    }
+
     [Fact]
     public void Warning_NoKestrelConfig_SaysNothing() =>
         Assert.Null(Warn(WriteProject("{ }")));

@@ -241,7 +241,9 @@ public static class ServiceSourcesBuilderExtensions
     /// <para>
     /// That line is correct on a warm checkout too — <c>WithHttpEndpoint</c> updates an endpoint of
     /// the same name using its non-null arguments only, and it has none — so there is one call, not
-    /// one per path. A service that declares none still runs: once the checkout has landed its real
+    /// one per path. Aspire names an endpoint after its scheme, so a service that declares an
+    /// <c>https</c> URL takes <c>WithHttpsEndpoint()</c> instead; the bare http call would add a
+    /// separate <c>http</c> endpoint beside it. A service that declares none still runs: once the checkout has landed its real
     /// launch profile and <c>Kestrel:Endpoints</c> configuration are read, and only a service that
     /// declares an <c>applicationUrl</c> or a Kestrel endpoint the AppHost did not mirror produces a
     /// warning naming the service and the URL. A service with neither on either path — a

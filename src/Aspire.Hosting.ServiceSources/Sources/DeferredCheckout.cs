@@ -819,6 +819,16 @@ internal sealed class DeferredCheckout
         // fact this warning exists to report.
         var urls = Raw.Join(", ", declared.Select(Raw.Escaped));
 
+        // Aspire names the endpoint after its scheme, so an https URL needs WithHttpsEndpoint, not a stray http one.
+        var anyHttps = declared.Any(u => u.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        var anyHttp = declared.Any(u => !u.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        var calls = (anyHttp, anyHttps) switch
+        {
+            (true, true) => Raw.Literal(".WithHttpEndpoint().WithHttpsEndpoint()"),
+            (false, true) => Raw.Literal(".WithHttpsEndpoint()"),
+            _ => Raw.Literal(".WithHttpEndpoint()"),
+        };
+
         var source = fromKestrel
             ? Raw.Compose($"its appsettings Kestrel:Endpoints configuration declares '{urls}'")
             : Raw.Compose($"its launch profile declares applicationUrl '{urls}'");
@@ -831,7 +841,7 @@ internal sealed class DeferredCheckout
             + $"The project will bind that URL itself and run, but the port is outside Aspire's management: it "
             + $"is not moved off a collision, nothing proxies it, service discovery cannot resolve this service "
             + $"and the dashboard will not link it. Declare it in the AppHost — builder.AddService(\"{new Name(serviceName)}\")"
-            + $".WithHttpEndpoint() — which also takes effect on every later run, where the checkout is warm and "
+            + $"{calls} — which also takes effect on every later run, where the checkout is warm and "
             + $"the endpoint comes from the project's own configuration as usual. This is reported after the clone rather than "
             + $"refused before it, so a service that has no endpoints on either path costs you nothing.");
     }
