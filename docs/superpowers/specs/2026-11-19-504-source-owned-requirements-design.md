@@ -1,11 +1,11 @@
 # One source-owned requirements model for the picker, the validator and Resolve (#504)
 
 **Date:** 2026-11-19
-**Status:** Draft
+**Status:** Approved (2026-11-19; the human decided every question in section 7)
 **Resolves:** #504 (and decides #495's `IsOfferedFor` and #497's `CanResolve` together with it).
 **Out of scope:** #497's already-fixed items (`SourceProbe` exception handling, `RequireKubernetesBlock`
 returning its block with `!`, the "a, b or c" remedy text), #513, validating a catalog `path:` against the
-filesystem in the picker (Open Question 1).
+filesystem in the picker (Resolved Question 1).
 **Measured against:** reading the repo at `origin/main` `daa515b`. Nothing here was run; the plan's tests
 re-check the claims made here.
 
@@ -41,7 +41,7 @@ Consequences, all present in the code:
 
 The human confirmed on 2026-11-19 only the ground rules: `IServiceSource` is internal, `IsOfferedFor` and
 `CanResolve` are in the unreleased 0.9.0, and breaking changes to it, including abstract members that force
-an edit to every source, are acceptable. Every decision below is the spec author's proposal, to be reviewed.
+an edit to every source, are acceptable. The decisions below were proposed by the spec author; the human approved them, with the answers recorded in section 7.
 
 ### D1. One method on `IServiceSource` returns the requirements; the two predicates are removed
 
@@ -130,7 +130,7 @@ with `Resolve`" is then true by construction for everything in `Check`, not by a
 override directory, and an empty `NoValues` struct for `repository` and `disabled`.
 
 `IServiceSource` stays (the registry type and the test seam); the base class is a helper. The alternative,
-keeping each source's `Resolve` hand-written and calling its own `Check` by convention, is Open Question 2.
+keeping each source's `Resolve` hand-written and calling its own `Check` by convention, was Resolved Question 2 (decided: base class).
 
 ### D4. How a source says "this setting is missing" without a new public member
 
@@ -212,7 +212,7 @@ save.
   builder (`ValidateCatalogPath` reads `ConfiguredRepositoryRoot(builder)`), the kind handler and the project
   file stays in `Build` and is **not** a requirement; neither is the group directory a redirect supplies
   (`GroupPathSource.ResolveDirectory`). That is the one place the model does not reach, and it is
-  stated rather than hidden (Open Question 1).
+  stated rather than hidden (Resolved Question 1).
 - `DisabledSource`: `FieldsFor` empty, `Check` returns `NoValues`.
 
 ### D9. `PickerAnswers` has one path
@@ -283,7 +283,7 @@ files, which is what the human accepted.
 - **A source added later** (the #495 plan mentions third-party sources, #54; `IServiceSource` is `internal`
   today, so nobody outside this assembly can add one) gets the same guarantees from the base class, but would run its `Check`
   inside the picker and error messages; the "no side effect" rule is documented on `ServiceSource<T>.Check`
-  and is not machine-checked (Open Question 3).
+  and is not machine-checked (Resolved Question 3).
 
 ## 5. Tests
 
@@ -350,22 +350,21 @@ a missing required setting is reported before a kind or project error that used 
 `PathSource.Resolve`. The plan lists the existing tests that pin an order and keeps them green or updates
 them with the reason.
 
-## 7. Open Questions
+## 7. Resolved Questions
 
-1. **Should `path`'s catalog `path:` be validated in the picker?** Today the picker checks only a typed
-   `path.path`; the catalog value's confinement and existence need `ConfiguredRepositoryRoot(builder)`, so
-   they stay in `Build`. Reaching them would put a repository-root resolver (not a builder) into
-   `SourceInput`. Proposed: no, here; file a follow-up if wanted. Without it, a `path` answer for a service
-   whose catalog directory is missing still saves and fails at the next start.
-2. **Template base class (D3) or convention?** The base class makes "`Resolve` runs `Check`" a compile-time
-   fact but gives all six sources a common ancestor and a two-method split. The alternative is `Check`
-   called by convention from each hand-written `Resolve`, covered by test 6 for four sources only.
-   Proposed: the base class.
-3. **Is a "no side effect" rule on `Check` enough, or should `IsSwitchRemedy` sources be required to be
-   pure by type?** Proposed: documented rule only, as there is no outside implementer.
-4. **Dialog wording for a missing setting.** D9 drops the label-based message in favour of `Resolve`'s. If the
-   dialog's friendlier wording matters, `FollowUpField.Label` can be interpolated into the dialog's own
-   pre-submit hint without a second validator. Proposed: accept the `Resolve` wording.
-5. **A group-aware picker.** `RepositoryConfig` is accepted by `SourceInput` but the picker passes `null`, so
-   a grouped member under a `path` group is still asked for `path:path`. Out of scope; noted so it is not
-   mistaken for a regression.
+The human decided each of these on 2026-11-19.
+
+1. **`path`'s catalog `path:` is not validated in the picker in this ticket.** The picker checks only a typed
+   `path.path`; the catalog value's confinement and existence stay in `Build` (they need
+   `ConfiguredRepositoryRoot(builder)`). A follow-up may add a repository-root resolver to `SourceInput`. Until
+   then a `path` answer for a service whose catalog directory is missing still saves and fails at the next start.
+2. **Template base class (D3).** `ServiceSource<TChecked>` with abstract `FieldsFor`/`Check`/`Build`/`IsSwitchRemedy`
+   and a sealed `Resolve`.
+3. **A documented "no side effect in `Check`" rule is enough** (D8, section 4). No type-level purity requirement.
+4. **The missing-setting wording is `Resolve`'s**, not the dialog's label-based message. The dialog's own
+   `Required` flag still stops an empty required field before anything is written.
+5. **Group-config for grouped `path` members stays out of scope.** `SourceInput.RepositoryConfig` is accepted but
+   the picker passes `null`, so a grouped member under a `path` group is still asked for `path:path`. This is not
+   a regression.
+6. **Message precedence changes for entries with two problems are acceptable.** A test that pins the old order is
+   updated, and the reason is stated in the commit that updates it.
