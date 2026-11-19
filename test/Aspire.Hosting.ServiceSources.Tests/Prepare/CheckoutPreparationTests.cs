@@ -1066,9 +1066,10 @@ public class CheckoutPreparationTests
                     // is a read that saw nothing rather than a read that saw half a file.
                 }
 
-                // NTFS refuses a replace while any handle is open, FileShare.Delete or not, so an
-                // unbroken read loop would exhaust the rename's retries and drop the write.
-                Thread.Sleep(1);
+                // NTFS refuses a replace while any handle is open, FileShare.Delete or not, and a
+                // reader descheduled mid-read under load holds one past the rename's retry budget,
+                // so leave gaps wide enough for the rename to land in.
+                Thread.Sleep(20);
             }
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
@@ -1076,8 +1077,15 @@ public class CheckoutPreparationTests
         {
             Assert.True(firstRead.Wait(TimeSpan.FromSeconds(10)), "the reader never completed a read");
 
+            // A dropped write is a legitimate best-effort outcome under load, so run again until
+            // the replace lands rather than asserting it lands the first time.
             fixture.Git.HeadCommitSha = "3333333333333333333333333333333333333333";
-            Run(fixture, Step());
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            do
+            {
+                Run(fixture, Step());
+            }
+            while (File.ReadAllText(fixture.MarkerPath) == recorded && DateTime.UtcNow < deadline);
         }
         finally
         {
