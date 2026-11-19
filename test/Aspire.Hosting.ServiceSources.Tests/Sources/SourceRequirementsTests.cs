@@ -96,4 +96,47 @@ public class SourceRequirementsTests
     [Fact]
     public void Url_IsASwitchRemedy() =>
         Assert.True(new UrlSource().IsSwitchRemedy);
+
+    [Theory]
+    [InlineData(null, 8080)]
+    [InlineData("ghcr.io/company/orders", null)]
+    [InlineData("ghcr.io/company/orders", 70000)]
+    public void Container_InvalidCatalogBlock_NotOffered_AndMessageIsResolveContainerConfigs(string? image, int? port)
+    {
+        var definition = Definition(image: image ?? " ", containerPort: port);
+
+        var requirements = new ContainerSource().Requirements(Input(definition));
+        var thrown = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ContainerSource.ResolveContainerConfig("orders", definition, new ServiceDeveloperConfig()));
+
+        Assert.False(requirements.Offered);
+        Assert.Equal(thrown.Message, requirements.Problem?.Message);
+    }
+
+    [Fact]
+    public void Container_NoContainerBlock_NotOffered() =>
+        Assert.False(new ContainerSource().Requirements(Input(Definition())).Offered);
+
+    [Fact]
+    public void Container_ImageAndPort_ResolvesWithNoFields()
+    {
+        var requirements = new ContainerSource().Requirements(Input(Definition(image: "ghcr.io/company/orders", containerPort: 8080)));
+
+        Assert.Empty(requirements.Fields);
+        Assert.True(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Container_UnsupportedCatalogScheme_NotOffered()
+    {
+        var requirements = new ContainerSource().Requirements(
+            Input(Definition(image: "ghcr.io/company/orders", containerPort: 8080, containerScheme: "ftp")));
+
+        Assert.False(requirements.Resolves);
+        Assert.False(requirements.Offered);
+    }
+
+    [Fact]
+    public void Container_IsASwitchRemedy() =>
+        Assert.True(new ContainerSource().IsSwitchRemedy);
 }
