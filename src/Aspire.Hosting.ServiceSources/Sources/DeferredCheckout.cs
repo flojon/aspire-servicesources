@@ -409,13 +409,13 @@ internal sealed class DeferredCheckout
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, PrepareStep? prepareStep, IGitClient? gitClient)
     {
+        var location = CheckoutsLocation.For(builder);
         if (prepareStep is null
             || gitClient is null
             || !builder.ExecutionContext.IsRunMode
             || !LocalGitCheckout.IsManagedCheckout(config)
-            || LocalGitCheckout.IsColdManagedCheckout(
-                CheckoutsLocation.For(builder), definition.Repository.CheckoutName, config)
-            || CheckoutsLocation.For(builder).Problem is not null)
+            || LocalGitCheckout.IsColdManagedCheckout(location, definition.Repository.CheckoutName, config)
+            || location.Problem is not null)
         {
             return false;
         }
@@ -423,7 +423,7 @@ internal sealed class DeferredCheckout
         return CheckoutPreparation.WouldRunBecauseCommandChanged(
             serviceName,
             prepareStep,
-            LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.For(builder), definition.Repository.CheckoutName),
+            LocalGitCheckout.ManagedRepoRoot(location, definition.Repository.CheckoutName),
             builder.AppHostDirectory,
             managedCheckout: true,
             gitClient);

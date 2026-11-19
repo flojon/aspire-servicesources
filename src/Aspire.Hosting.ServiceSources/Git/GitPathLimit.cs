@@ -78,7 +78,7 @@ internal static class GitPathLimit
     /// </summary>
     internal static Raw ShortenAdvice(CheckoutsLocation location, int excess, int rootLimit) =>
         location.IsExternal
-            ? Raw.Compose($"Shorten '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}': the checkouts directory it gives, '{Raw.Display(location.CheckoutsRoot)}', is {location.CheckoutsRoot.Length} characters and at most {MaxCheckoutsRoot(rootLimit)} fit, so its value must be at least {Shorter(excess)} shorter.")
+            ? Raw.Compose($"Shorten '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}' by at least {Shorter(excess)}: its value, plus the '\\<hash>\\checkouts' the tool appends, gives '{Raw.Display(location.CheckoutsRoot)}'.")
             : Raw.Compose($"Move the AppHost, or the worktree it is in, to a path at least {Shorter(excess)} shorter, or set '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}' (environment variable '{Raw.Literal(CheckoutsLocation.EnvironmentVariable)}') to a short directory such as '{Raw.Literal(CheckoutsLocation.SuggestedDirectory)}'.");
 
     /// <summary>What a too-deep checkout kept in place needs before it can be cloned again with a short git directory.</summary>

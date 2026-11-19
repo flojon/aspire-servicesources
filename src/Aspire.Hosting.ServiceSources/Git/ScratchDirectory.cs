@@ -177,8 +177,18 @@ internal sealed class ScratchDirectory : IDisposable
         }
     }
 
-    private static bool IsReparsePoint(string path) =>
-        new FileInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint);
+    // A path that vanished mid-sweep is a sibling's cleanup, not a link.
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
 
     // The id is spliced into a search pattern, so anything but the generated shape must not reach it.
     private static bool IsStagingId(string id) => id.Length == 8 && id.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'));

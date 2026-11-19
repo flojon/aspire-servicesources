@@ -53,8 +53,7 @@ public class CloneLayoutMessageTests
             Assert.Contains("Shorten 'ServiceSources:CheckoutsDirectory'", message);
             Assert.DoesNotContain("Move the AppHost", message);
         });
-        Assert.Contains($"at most {GitPathLimit.MaxCheckoutsRoot(GitPathLimit.MaxWorkingTreeRootLength)} fit", tooDeep);
-        Assert.Contains($"at most {GitPathLimit.MaxCheckoutsRoot(GitPathLimit.MaxInPlaceRootLength)} fit", noGitRoot);
+        Assert.All(new[] { tooDeep, noGitRoot }, message => Assert.Contains("the tool appends", message));
     }
 
     [Fact]

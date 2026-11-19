@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
+[Trait("IO", "true")]
 public class CheckoutsLocationTests
 {
     private const string Key = "ServiceSources:CheckoutsDirectory";

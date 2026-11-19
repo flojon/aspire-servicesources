@@ -78,7 +78,7 @@ Then re-run, and it is cloned again with a short git directory (this needs an Ap
 
 A service can fail to build inside its checkout with an MSBuild error such as `Path ... is too long`
 even though git cloned it without complaint: a build adds its own output paths below the checkout, and
-an AppHost directory of around 145 characters already leaves too little room for them. This tool does
+a deep AppHost directory leaves too little room for them. This tool does
 not predict MSBuild's limit, so no refusal fires first. Put the checkouts at a short path instead:
 
 ```powershell
@@ -87,7 +87,7 @@ $env:ServiceSources__CheckoutsDirectory = 'C:\ss'
 
 or `"checkoutsDirectory": "C:\\ss"` in `servicesources.local.json`. See [Placing checkouts outside the
 AppHost directory](sources/repository.md#placing-checkouts-outside-the-apphost-directory). Checkouts already
-under `.servicesources/checkouts` are not moved; delete them so the next start clones into the new place.
+under `.servicesources/checkouts` are left alone and ignored; delete them to reclaim the space.
 
 ## Getting the full exception detail
 

@@ -70,7 +70,7 @@ internal sealed record CheckoutsLocation(
             return fallback with
             {
                 Problem = Raw.Compose(
-                    $"'{key}' is '{Raw.Display(configuredValue)}', which is not an absolute local directory. It must be a full path such as a short directory on a local drive; relative, network (UNC) and device paths are not accepted."),
+                    $"'{key}' is '{Raw.Display(configuredValue)}', which is not an absolute local directory. It must be a full path on a local drive, such as '{Raw.Literal(SuggestedDirectory)}'; relative, drive-relative ('C:foo'), network (UNC) and device paths are not accepted."),
             };
         }
 
@@ -91,7 +91,7 @@ internal sealed record CheckoutsLocation(
 
         // A filesystem root contains everything on its drive, yet its hashed child is nowhere near the source.
         var isFilesystemRoot = string.Equals(Path.GetPathRoot(root), root, ManagedGitDirectory.PathComparison);
-        if (!isFilesystemRoot && IsSameOrInside(appHost, root) || string.Equals(appHost, root, ManagedGitDirectory.PathComparison))
+        if ((!isFilesystemRoot && IsSameOrInside(appHost, root)) || string.Equals(appHost, root, ManagedGitDirectory.PathComparison))
         {
             return fallback with
             {
