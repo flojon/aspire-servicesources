@@ -2,9 +2,6 @@ using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-/// <summary>One extra answer the interactive picker asks for; <paramref name="Key"/> is the config path under the service entry.</summary>
-internal sealed record FollowUpField(string Key, string Label, bool Required, InputType InputType);
-
 /// <summary>
 /// The extra answers a chosen source needs beyond its name.
 /// </summary>
