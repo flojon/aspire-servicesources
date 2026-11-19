@@ -40,4 +40,60 @@ public class SourceRequirementsTests
     [Fact]
     public void Disabled_IsNotASwitchRemedy() =>
         Assert.False(new DisabledSource().IsSwitchRemedy);
+
+    [Fact]
+    public void Url_BlankCatalogUrl_AsksUrlField_AndTheProblemIsTheMissingUrlSetting()
+    {
+        var requirements = new UrlSource().Requirements(Input(Definition()));
+
+        Assert.Equal([("url:url", true)], Keys(requirements));
+        Assert.Equal("url:url", requirements.Problem?.MissingSetting);
+        Assert.True(requirements.Offered);
+        Assert.False(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Url_CatalogUrlPresent_NoFields_Resolves()
+    {
+        var requirements = new UrlSource().Requirements(Input(Definition(url: "https://orders.example.com")));
+
+        Assert.Empty(requirements.Fields);
+        Assert.True(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Url_DeveloperUrlOnly_Resolves()
+    {
+        var config = new ServiceDeveloperConfig { Url = new UrlDeveloperConfig { Url = "http://localhost:5000" } };
+
+        Assert.True(new UrlSource().Requirements(Input(Definition(), config)).Resolves);
+    }
+
+    [Fact]
+    public void Url_FtpCatalogUrl_ProblemIsUntagged_NotOffered()
+    {
+        var requirements = new UrlSource().Requirements(Input(Definition(url: "ftp://orders.example.com")));
+
+        Assert.NotNull(requirements.Problem);
+        Assert.Null(requirements.Problem.MissingSetting);
+        Assert.False(requirements.Offered);
+    }
+
+    [Fact]
+    public void Url_ProblemMessage_EqualsWhatResolveThrows_AndRedactsCredentials()
+    {
+        var definition = Definition(url: "redis://user:pw@cache:6379");
+
+        var problem = new UrlSource().Requirements(Input(definition)).Problem;
+        var thrown = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => UrlSource.ResolveUrl("orders", definition, new ServiceDeveloperConfig()));
+
+        Assert.NotNull(problem);
+        Assert.Equal(thrown.Message, problem.Message);
+        Assert.DoesNotContain("pw", problem.Message);
+    }
+
+    [Fact]
+    public void Url_IsASwitchRemedy() =>
+        Assert.True(new UrlSource().IsSwitchRemedy);
 }
