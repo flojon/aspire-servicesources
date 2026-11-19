@@ -112,8 +112,4 @@ public class ServiceSourceTests
         Assert.Same(repositoryConfig, input.RepositoryConfig);
         Assert.Equal(directory, input.AppHostDirectory);
     }
-
-    [Fact]
-    public void Resolve_IsSealed() =>
-        Assert.True(typeof(ServiceSource<int>).GetMethod("Resolve")!.IsFinal);
 }

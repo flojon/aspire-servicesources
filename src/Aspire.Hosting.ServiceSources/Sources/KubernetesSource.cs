@@ -128,8 +128,8 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : ServiceSo
     /// <exception cref="ServiceSourcesConfigurationException">The configuration would not resolve.</exception>
     private static KubernetesChecked CheckEntry(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        // The scheme is a catalog fact no dialog answer fixes, so it is judged before the context and
-        // port: an entry the dialog cannot repair must not be offered.
+        // Judged before the context and port so a bad catalog scheme hides the source from the picker
+        // (the dialog's own scheme answer is not consulted when it opens).
         var scheme = ResolveScheme(serviceName, definition, config);
         var kubernetes = RequireKubernetesBlock(serviceName, definition);
         var (context, remotePort) = ResolveForwardTarget(serviceName, kubernetes, definition, config);

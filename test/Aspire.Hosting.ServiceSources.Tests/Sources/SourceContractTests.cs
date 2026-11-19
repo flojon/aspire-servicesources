@@ -224,6 +224,65 @@ public class SourceContractTests
         Assert.Contains("path:path", keys);
     }
 
+    // A key the developer config accepts is one a dialog answer could supply.
+    private static bool IsDeveloperConfigKey(string key)
+    {
+        try
+        {
+            var section = Bind([(key, "8080")]);
+
+            DeveloperConfigValidator.ValidateAll([section], DeveloperConfigShape.Service);
+
+            var bound = section.Get<ServiceDeveloperConfig>() ?? new ServiceDeveloperConfig();
+            return JsonSerializer.Serialize(bound) != JsonSerializer.Serialize(new ServiceDeveloperConfig());
+        }
+        catch (ServiceSourcesConfigurationException)
+        {
+            return false;
+        }
+    }
+
+    private static ServiceDeveloperConfig WithContext()
+    {
+        var config = new ServiceDeveloperConfig();
+        config.Kubernetes.Context = "dev";
+        return config;
+    }
+
+    [Fact]
+    public void EveryMissingSetting_ThatAnAnswerCouldSupply_HasAMatchingField()
+    {
+        var appHost = AppHost();
+        var reached = new HashSet<string>();
+
+        foreach (var (name, source) in ServiceSourcesBuilderExtensions.Sources)
+        {
+            foreach (var sample in Samples())
+            {
+                // Only the first missing setting is reported, so a context-bearing config reaches the port.
+                foreach (var config in new[] { new ServiceDeveloperConfig(), WithContext() })
+                {
+                    var requirements = source.Requirements(Input(sample.Definition, config, appHost));
+
+                    if (requirements.Problem?.MissingSetting is not { } key || !IsDeveloperConfigKey(key))
+                    {
+                        continue;
+                    }
+
+                    reached.Add(key);
+                    Assert.True(
+                        requirements.Fields.Any(f => f.Key == key),
+                        $"Source '{name}', {sample.Label}: Check needs '{key}' but no follow-up field asks for it.");
+                }
+            }
+        }
+
+        foreach (var key in new[] { "url:url", "kubernetes:context", "kubernetes:port", "path:path" })
+        {
+            Assert.Contains(key, reached);
+        }
+    }
+
     [Fact]
     public void EveryField_HasALabel()
     {
