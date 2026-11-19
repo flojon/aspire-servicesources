@@ -10,10 +10,11 @@ public class SourceRequirementsTests
     private static ServiceDefinition Definition(
         string? path = null, string? url = null, string? image = null, int? containerPort = null,
         string? containerScheme = null, string? kubernetesService = null, int? kubernetesPort = null,
-        string? kubernetesScheme = null, string? repository = "https://github.com/company/orders") =>
+        string? kubernetesScheme = null, string? repository = "https://github.com/company/orders", bool grouped = false) =>
         new ServiceMetadata
         {
             Repository = repository ?? "",
+            RepositoryRef = grouped ? "monorepo" : null,
             Project = "Orders.csproj",
             Path = path,
             Url = url is null ? null : new UrlMetadata { Url = url },
@@ -21,7 +22,14 @@ public class SourceRequirementsTests
             Kubernetes = kubernetesService is null
                 ? null
                 : new KubernetesMetadata { Service = kubernetesService, Port = kubernetesPort, Scheme = kubernetesScheme },
-        }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
+        }.ToDefinition(
+            "servicesources.yaml", "orders",
+            grouped
+                ? new Dictionary<string, RepositoryDefinition>
+                {
+                    ["monorepo"] = new() { Url = "https://github.com/company/monorepo", CheckoutName = "monorepo" },
+                }
+                : TestHelpers.EmptyRepositories);
 
     private static SourceInput Input(ServiceDefinition definition, ServiceDeveloperConfig? config = null, string appHost = "apphost") =>
         new("orders", definition, config ?? new ServiceDeveloperConfig(), appHost);
@@ -239,4 +247,45 @@ public class SourceRequirementsTests
     [Fact]
     public void Kubernetes_IsASwitchRemedy() =>
         Assert.True(Kubernetes().IsSwitchRemedy);
+
+    [Fact]
+    public void Path_BlankCatalogPath_AsksPathField_ProblemIsTheMissingPathSetting()
+    {
+        var requirements = new PathSource().Requirements(Input(Definition()));
+
+        Assert.Equal([("path:path", true)], Keys(requirements));
+        Assert.Equal("path:path", requirements.Problem?.MissingSetting);
+        Assert.True(requirements.Offered);
+        Assert.Contains("gives it no directory to use", requirements.Problem?.Message);
+    }
+
+    [Fact]
+    public void Path_WhitespaceCatalogPath_AsksPath() =>
+        Assert.Equal([("path:path", true)], Keys(new PathSource().Requirements(Input(Definition(path: "  ")))));
+
+    [Fact]
+    public void Path_CatalogPathPresent_NoFields_ResolvesForTheEmptyConfig()
+    {
+        var requirements = new PathSource().Requirements(Input(Definition(path: "does-not-exist-anywhere")));
+
+        Assert.Empty(requirements.Fields);
+        Assert.True(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Path_GroupRedirect_BlankCatalogPath_DoesNotAskOrFail()
+    {
+        var definition = Definition(grouped: true);
+        var config = new ServiceDeveloperConfig { Source = "path" };
+        var group = new RepositoryDeveloperConfig { Source = "path" };
+        Assert.True(GroupPathSource.Redirects("orders", definition, config, group));
+
+        var requirements = new PathSource().Requirements(Input(definition, config) with { RepositoryConfig = group });
+
+        Assert.True(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Path_IsNotASwitchRemedy() =>
+        Assert.False(new PathSource().IsSwitchRemedy);
 }
