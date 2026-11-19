@@ -15,6 +15,10 @@ interface (as thin delegates to the new model where a source had its own). Then 
 `Requirements`/`IsSwitchRemedy`, the consumers switch, and the old members and `SourceFollowUp` are deleted. No
 public API change: `PublicAPI.*.txt` stay untouched (the build has no RS0016/RS0017).
 
+**Legacy delegates (Tasks 5-9):** where a source already overrides `IsOfferedFor`/`CanResolve`, keep the member as a
+one-line delegate: `Requirements(new SourceInput("", definition, config-or-new ServiceDeveloperConfig(), "")).Offered`
+(or `.Resolves`). They exist only so the interface and its consumers compile until Task 10c.
+
 **Test placement and traits:** new pure classes carry no trait. A test that creates a directory or a builder over one
 (`TestHelpers.CreateBuilder(TempDirectories...)`, as `LocalProjectSourceTests.PlainBuilder`) is in a class carrying
 `[Trait("IO", "true")]`. No new `Concurrency` or `Timing` is expected.
@@ -22,7 +26,7 @@ public API change: `PublicAPI.*.txt` stay untouched (the build has no RS0016/RS0
 **Verify commands:**
 - Build: `dotnet build -c Release -warnaserror`
 - Task test run: `dotnet test test/Aspire.Hosting.ServiceSources.Tests -c Release --filter "<per task>"`
-- After tasks 7, 9, 11 and 13: the full suite `dotnet test -c Release --no-build`.
+- After tasks 7, 9, 10c, 11, 12 and 13: the full suite `dotnet test -c Release --no-build`.
 - Once before the PR: the `dotnet pack` leg from the notes file.
 
 ---
@@ -178,9 +182,9 @@ resolution; the `PathSourceTests` class already carries `IO`/`Concurrency`):
 - `Path_OverrideToExistingDirectory_Resolves`.
 - `Path_GroupRedirect_BlankCatalogPath_DoesNotAskOrFail` (a `RepositoryConfig` whose source is `path`, a grouped
   member: `Check` passes, as `Resolve` does).
-- `Path_ResolveOverride_IsDoneOnce` (a spy is not available; assert `Build` receives the checked directory by running
-  `Resolve` against an override and observing the project resolves from it: existing `PathSourceTests` already cover
-  the result).
+- `Path_Resolve_WithOverride_UsesTheCheckedDirectory` (`Resolve` over an override directory holding the project
+  resolves from it; the existing override tests in `PathSourceTests` stay green and are the regression net for `Build`
+  no longer calling `ResolveOverride` itself).
 - `Path_BlankCatalogPathAndTypoKind_ReportsTheMissingPathFirst`: pins the precedence change of Resolved Question 6.
 - `Path_IsNotASwitchRemedy`.
 
@@ -286,6 +290,10 @@ with an empty config and configs that fill each source's block or hold invalid v
   `disabled`: `Problem.Message` equals the message `Resolve` throws, and `Problem is null` iff `Resolve` returns.
 - The existing `SourceChoicesTests.DisplayOrder_CoversEverySource` stays.
 
+**Sample values for the closed loop:** `url:url` -> `http://localhost:5000`; `kubernetes:context` -> `dev`;
+`kubernetes:port` -> `8080`; `kubernetes:namespace`, `kubernetes:scheme` -> `default`, `http`; `path:path` -> an
+existing temp directory, which is also the `SourceInput.AppHostDirectory` for that sample.
+
 **Red check (record the output in the notes file):** with each of the following reverted locally, the named test
 fails, then restore: delete the `kubernetes:context` field from `KubernetesSource.FieldsFor` (closed loop);
 remove `Problem is null ||` from `Offered` (`ResolvesImpliesOffered`); flip `UrlSource.IsSwitchRemedy` (pin). And the
@@ -302,8 +310,8 @@ compile-time contract: comment out `Check` in one source and observe `CS0534`; r
   (`'kubernetes.context'`), not the dialog's `'kubernetes:context' (Kubernetes context)` (Resolved Question 4).
 - New: `Validate_SourceNotOffered_RejectsTheMergedEntryToo` (what `ValidateEntry` used to wave through with
   `?? source`); `Validate_SettingAlreadyInTheFile_SatisfiesTheRequirement` (an entry with `url.url`);
-  `Validate_ContainerAndRepositoryAnswers_AreResolveChecked` (a container entry for a catalog with a bad port is
-  rejected, which the old validator never checked); `Validate_ForgedSourceName_IsEscapedInTheMessage`.
+  `Validate_OfferedContainerAndRepositoryEntries_PassThroughCheck` (both now run `Check` at save; an offered one
+  always passes, so this pins that the path exists and does not throw, while a not-offered one is the rejection above); `Validate_ForgedSourceName_IsEscapedInTheMessage`.
 - `UnconfiguredPromptTests` (class carries `IO`/`Concurrency`/`Timing`): a recording `IDeveloperConfigWriter` shows
   `SaveOneAsync` validates nothing before `SaveAsync` and passes exactly one `validateMerged` callback
   (`Save_ValidatesOnce_ThroughTheWritersCallback`); with the real writer a bad answer yields exactly one failure
