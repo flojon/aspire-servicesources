@@ -144,6 +144,9 @@ internal sealed class LocalCheckoutPrefetch
     // WorktreeHome caches per builder, so concurrent clones share one resolution.
     private Func<string?>? _homeAppHostDirectory;
 
+    // The raw setting rather than a location: callers pass the AppHost directory they mean, and a location is a function of both.
+    private string? _checkoutsDirectory;
+
     // Reconciling runs after a checkout's progress stream has ended, so a notice has to go to the buffered warnings.
     private Action<Raw>? _notice;
 
@@ -187,6 +190,7 @@ internal sealed class LocalCheckoutPrefetch
             _started = true;
             _isRunMode = builder.ExecutionContext.IsRunMode;
             _homeAppHostDirectory = () => WorktreeHome.TryResolve(builder)?.AppHostDirectory;
+            _checkoutsDirectory = CheckoutsLocation.For(builder).ConfiguredValue;
             var warnings = ServiceSourcesWarnings.For(builder);
             _notice = warnings.AddNotice;
 
@@ -636,7 +640,8 @@ internal sealed class LocalCheckoutPrefetch
             try
             {
                 prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress,
+                    serviceName, definition, config, repositoryConfig, appHostDirectory,
+                    CheckoutsLocation.Resolve(appHostDirectory, _checkoutsDirectory), gitClient, progress,
                     _homeAppHostDirectory);
             }
             finally
@@ -737,7 +742,7 @@ internal sealed class LocalCheckoutPrefetch
             // service's own name would launch a redundant speculative clone task for it — harmless
             // (PrepareRepoRoot no-ops against an existing '.git'), but wasted background work.
             .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
-                appHostDirectory, candidate.Definition.Repository.CheckoutName, candidate.Config))
+                CheckoutsLocation.For(builder), candidate.Definition.Repository.CheckoutName, candidate.Config))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
                 builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))
@@ -871,7 +876,8 @@ internal sealed class LocalCheckoutPrefetch
                 // may never be added, but reconciling an existing checkout is not — see
                 // GetRepoRoot, which finishes the job for the services that are.
                 var prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress,
+                    serviceName, definition, config, repositoryConfig, appHostDirectory,
+                    CheckoutsLocation.Resolve(appHostDirectory, _checkoutsDirectory), gitClient, progress,
                     _homeAppHostDirectory);
                 return new CheckoutResult(prepared, null);
             }

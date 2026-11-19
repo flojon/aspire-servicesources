@@ -26,7 +26,8 @@ internal sealed record CloneLayoutOptions(
 /// </summary>
 internal static class CloneLayout
 {
-    public static CloneLayoutKind Decide(Raw label, string checkoutPath, string stagingPath, CloneLayoutOptions options)
+    public static CloneLayoutKind Decide(
+        Raw label, string checkoutPath, string stagingPath, CloneLayoutOptions options, CheckoutsLocation location)
     {
         if (!(options.IsWindows ?? OperatingSystem.IsWindows()) && !options.ForceSeparate)
         {
@@ -43,12 +44,12 @@ internal static class CloneLayout
         {
             var excess = longestRoot.Length - GitPathLimit.MaxWorkingTreeRootLength;
             throw ServiceSourcesConfigurationException.For(
-                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot find a repository whose '.git' path passes {GitPathLimit.MaxGitFilePathLength} characters, so a working tree directory path is limited to about {GitPathLimit.MaxWorkingTreeRootLength} characters, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). Move the AppHost, or the worktree it is in, to a path at least {GitPathLimit.Shorter(excess)} shorter.");
+                $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows cannot find a repository whose '.git' path passes {GitPathLimit.MaxGitFilePathLength} characters, so a working tree directory path is limited to about {GitPathLimit.MaxWorkingTreeRootLength} characters, and the clone would be staged at '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters). {GitPathLimit.ShortenAdvice(location, excess, GitPathLimit.MaxWorkingTreeRootLength)}");
         }
 
         if (!GitPathLimit.IsUsableGitRoot(options.GitRoot))
         {
-            throw GitPathLimit.GitRootRefusal(label, checkoutPath, longestRoot, options.GitDirLimit, options.GitRoot);
+            throw GitPathLimit.GitRootRefusal(label, checkoutPath, longestRoot, options.GitDirLimit, options.GitRoot, location);
         }
 
         return CloneLayoutKind.Separate;

@@ -156,7 +156,7 @@ public class LocalProjectSourceTests
         RepositoryDeveloperConfig? repositoryConfig = null)
     {
         var repoRoot = LocalGitCheckout.ResolveRepoRoot(
-            serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient);
+            serviceName, definition, config, repositoryConfig, appHostDirectory, CheckoutsLocation.Default(appHostDirectory), gitClient);
 
         return LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, definition.Project);
     }
@@ -204,7 +204,7 @@ public class LocalProjectSourceTests
         // the guard every kind shares: for a non-dotnet kind nothing downstream would catch it.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                ServiceName, Definition(), DevConfig(path: "frontned"), null, appHostDirectory, gitClient));
+                ServiceName, Definition(), DevConfig(path: "frontned"), null, appHostDirectory, CheckoutsLocation.Default(appHostDirectory), gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(Name.Escape(missing), ex.Message);
@@ -243,7 +243,7 @@ public class LocalProjectSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.PrepareRepoRoot(
                 ServiceName, GroupedDefinition(), DevConfig(@ref: "feature/x"), repositoryConfig: null,
-                UnusedManagedAppHostDirectory, new FakeGitClient()));
+                UnusedManagedAppHostDirectory, CheckoutsLocation.Default(UnusedManagedAppHostDirectory), new FakeGitClient()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
         Assert.Contains("'repository.ref' cannot be set", ex.Message);
@@ -265,7 +265,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.PrepareRepoRoot(
-                ServiceName, Definition(), DevConfig(), repositoryConfig: null, appHostDirectory, gitClient));
+                ServiceName, Definition(), DevConfig(), repositoryConfig: null, appHostDirectory, CheckoutsLocation.Default(appHostDirectory), gitClient));
 
         Assert.Contains("characters shorter", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("clone was attempted", ex.Message, StringComparison.Ordinal);
@@ -276,14 +276,14 @@ public class LocalProjectSourceTests
     {
         var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, ServiceName);
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(appHostDirectory), ServiceName);
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
 
         // Reaches UseExistingCheckout rather than throwing — the regression guard: a grouped-only
         // check must never fire for the overwhelming common, ungrouped case.
         var resolved = LocalGitCheckout.PrepareRepoRoot(
             ServiceName, Definition(), DevConfig(@ref: "feature/x"), repositoryConfig: null,
-            appHostDirectory, gitClient);
+            appHostDirectory, CheckoutsLocation.Default(appHostDirectory), gitClient);
 
         Assert.Equal(repoRoot, resolved.RepoRoot);
         Assert.True(resolved.NeedsReconciliation);
@@ -305,7 +305,7 @@ public class LocalProjectSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.PrepareRepoRoot(
                 ServiceName, GroupedDefinition(), DevConfig(), repositoryConfig: null,
-                appHostDirectory, gitClient));
+                appHostDirectory, CheckoutsLocation.Default(appHostDirectory), gitClient));
 
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.DoesNotContain($"Service '{ServiceName}'", ex.Message);
@@ -316,7 +316,7 @@ public class LocalProjectSourceTests
     {
         var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "monorepo");
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(appHostDirectory), "monorepo");
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
 
         var repositoryConfig = new RepositoryDeveloperConfig { Ref = "feature/repo-level" };
@@ -324,7 +324,7 @@ public class LocalProjectSourceTests
 
         LocalGitCheckout.ReconcileRepoRoot(
             ServiceName, definition, DevConfig(), repositoryConfig,
-            new LocalGitCheckout.PreparedCheckout(repoRoot, NeedsReconciliation: true), gitClient);
+            new LocalGitCheckout.PreparedCheckout(repoRoot, NeedsReconciliation: true, CheckoutsLocation.Default(Path.GetTempPath())), gitClient);
 
         var (checkedOutPath, reference) = Assert.Single(gitClient.CheckedOutRefs);
         Assert.Equal(repoRoot, checkedOutPath);
@@ -1531,7 +1531,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                "../escapee", Definition(serviceName: "../escapee"), DevConfig(), null, appHostDirectory, gitClient));
+                "../escapee", Definition(serviceName: "../escapee"), DevConfig(), null, appHostDirectory, CheckoutsLocation.Default(appHostDirectory), gitClient));
 
         Assert.Contains("../escapee", ex.Message);
         Assert.Empty(gitClient.ClonedRepos);
@@ -2386,7 +2386,7 @@ public class LocalProjectSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.PrepareRepoRoot(
                 ServiceName, definition, DevConfig(), repositoryConfig: null,
-                UnusedAppHostDirectory, gitClient));
+                UnusedAppHostDirectory, CheckoutsLocation.Default(UnusedAppHostDirectory), gitClient));
 
         // The label, not just the name: the interpolated repoRoot already contains the bare service
         // name, so asserting that alone would pass whatever the label selection did.
@@ -2414,7 +2414,7 @@ public class LocalProjectSourceTests
         };
 
         var prepared = LocalGitCheckout.PrepareRepoRoot(
-            ServiceName, definition, DevConfig(), repositoryConfig: null, appHost, new FakeGitClient());
+            ServiceName, definition, DevConfig(), repositoryConfig: null, appHost, CheckoutsLocation.Default(appHost), new FakeGitClient());
 
         Assert.Equal(repoRoot, prepared.RepoRoot);
         Assert.True(prepared.NeedsReconciliation);

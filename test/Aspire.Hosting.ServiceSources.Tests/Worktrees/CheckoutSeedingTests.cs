@@ -25,7 +25,7 @@ public class CheckoutSeedingTests
 
     private static string HomeCheckout(string homeAppHost)
     {
-        var root = LocalGitCheckout.ManagedRepoRoot(homeAppHost, "orders");
+        var root = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(homeAppHost), "orders");
         Directory.CreateDirectory(Path.Combine(root, ".git"));
         return root;
     }
@@ -33,11 +33,11 @@ public class CheckoutSeedingTests
     private static LocalGitCheckout.PreparedCheckout Prepare(
         string appHost, string? home, IGitClient git, IGitProgressSink? progress = null, string url = Url) =>
         LocalGitCheckout.PrepareRepoRoot(
-            "orders", Definition(url), DevConfig(), repositoryConfig: null, appHost, git, progress, () => home);
+            "orders", Definition(url), DevConfig(), repositoryConfig: null, appHost, CheckoutsLocation.Default(appHost), git, progress, () => home);
 
     private static IEnumerable<string> Scratch(string appHost) =>
         Directory.EnumerateDirectories(
-            Path.GetDirectoryName(LocalGitCheckout.ManagedRepoRoot(appHost, "orders"))!, ".incoming-*");
+            Path.GetDirectoryName(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(appHost), "orders"))!, ".incoming-*");
 
     [Fact]
     public void MatchingHomeCheckout_IsBorrowedFrom()
@@ -69,7 +69,7 @@ public class CheckoutSeedingTests
     public void HomeCheckoutWithAGitFile_IsNotBorrowedFrom()
     {
         var home = NewAppHost();
-        var root = LocalGitCheckout.ManagedRepoRoot(home, "orders");
+        var root = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(home), "orders");
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, ".git"), "gitdir: elsewhere");
         var git = new ScriptedCloneGitClient { HomeOrigin = Url };
@@ -178,6 +178,102 @@ public class CheckoutSeedingTests
         Assert.Empty(git.PlainClones);
     }
 
+    private static string SharedRoot() => Path.Combine(TempDirectories.CreateSubdirectory().FullName, "ss");
+
+    private static string HomeCheckoutUnder(string root, string homeAppHost)
+    {
+        var checkout = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Resolve(homeAppHost, root), "orders");
+        Directory.CreateDirectory(Path.Combine(checkout, ".git"));
+        return checkout;
+    }
+
+    [Fact]
+    public void Home_under_the_same_root_is_found()
+    {
+        var root = SharedRoot();
+        var home = NewAppHost();
+        var thisRun = NewAppHost();
+        var homeCheckout = HomeCheckoutUnder(root, home);
+        var git = new ScriptedCloneGitClient { HomeOrigin = Url };
+
+        Assert.Equal(
+            homeCheckout,
+            LocalGitCheckout.ReferenceCheckout(home, CheckoutsLocation.Resolve(thisRun, root), Definition(), git));
+    }
+
+    [Fact]
+    public void Home_under_the_same_root_is_borrowed_from_by_a_clone()
+    {
+        var root = SharedRoot();
+        var home = NewAppHost();
+        var thisRun = NewAppHost();
+        var homeCheckout = HomeCheckoutUnder(root, home);
+        var git = new ScriptedCloneGitClient { HomeOrigin = Url };
+
+        LocalGitCheckout.PrepareRepoRoot(
+            "orders", Definition(), DevConfig(), repositoryConfig: null, thisRun, CheckoutsLocation.Resolve(thisRun, root),
+            git, progress: null, () => home);
+
+        Assert.Equal(homeCheckout, Assert.Single(git.ReferenceClones).Reference);
+    }
+
+    [Fact]
+    public void Origin_mismatch_is_still_refused()
+    {
+        var root = SharedRoot();
+        var home = NewAppHost();
+        HomeCheckoutUnder(root, home);
+        var git = new ScriptedCloneGitClient { HomeOrigin = "https://example.com/billing.git" };
+
+        Assert.Null(LocalGitCheckout.ReferenceCheckout(home, CheckoutsLocation.Resolve(NewAppHost(), root), Definition(), git));
+    }
+
+    [Fact]
+    public void Home_at_a_different_root_or_default_falls_back_to_a_plain_clone_without_error()
+    {
+        var home = NewAppHost();
+        HomeCheckout(home);
+        HomeCheckoutUnder(SharedRoot(), home);
+        var thisRun = NewAppHost();
+        var git = new ScriptedCloneGitClient { HomeOrigin = Url };
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            "orders", Definition(), DevConfig(), repositoryConfig: null, thisRun, CheckoutsLocation.Resolve(thisRun, SharedRoot()),
+            git, progress: null, () => home);
+
+        Assert.Empty(git.ReferenceClones);
+        Assert.Single(git.PlainClones);
+        Assert.True(Directory.Exists(Path.Combine(prepared.RepoRoot, ".git")));
+    }
+
+    [Fact]
+    public void Spelling_difference_misses_and_clones_plainly()
+    {
+        var root = SharedRoot();
+        var home = NewAppHost();
+        HomeCheckoutUnder(root, home);
+        var spelledDifferently = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "home-link");
+        try
+        {
+            Directory.CreateSymbolicLink(spelledDifferently, home);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        var git = new ScriptedCloneGitClient { HomeOrigin = Url };
+        var thisRun = NewAppHost();
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            "orders", Definition(), DevConfig(), repositoryConfig: null, thisRun, CheckoutsLocation.Resolve(thisRun, root),
+            git, progress: null, () => spelledDifferently);
+
+        Assert.Empty(git.ReferenceClones);
+        Assert.Single(git.PlainClones);
+        Assert.True(Directory.Exists(Path.Combine(prepared.RepoRoot, ".git")));
+    }
+
     [Fact]
     public void RealGit_ColdCheckoutInAWorktree_IsAnOrdinaryCloneOfTheCatalogUrl()
     {
@@ -185,11 +281,11 @@ public class CheckoutSeedingTests
         var url = new Uri(origin.Path).AbsoluteUri;
         var git = new GitCliClient(TestRepository.IsolatedEnvironment());
         var home = NewAppHost();
-        var homeCheckout = LocalGitCheckout.ManagedRepoRoot(home, "orders");
+        var homeCheckout = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(home), "orders");
         git.Clone(url, homeCheckout);
         TestRepository.At(homeCheckout).Git("branch", "home-only");
 
-        Assert.Equal(homeCheckout, LocalGitCheckout.ReferenceCheckout(home, Definition(url), git));
+        Assert.Equal(homeCheckout, LocalGitCheckout.ReferenceCheckout(home, CheckoutsLocation.Default(Path.GetTempPath()), Definition(url), git));
 
         var prepared = Prepare(NewAppHost(), home, git, url: url);
 
@@ -236,7 +332,7 @@ public class CheckoutSeedingTests
             """{ "services": { "orders": { "source": "repository" } } }""");
         ToolDirectory.Ensure(fake.WorktreeAppHost);
         File.WriteAllText(Path.Combine(fake.WorktreeAppHost, ".servicesources", "worktree-seed.json"), "{}");
-        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(fake.WorktreeAppHost, "orders"), ".git"));
+        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(fake.WorktreeAppHost), "orders"), ".git"));
         var git = new ScriptedCloneGitClient { HomeOrigin = Url };
         var builder = fake.CreateWorktreeBuilder();
         builder.SetCheckoutTiming(CheckoutTiming.Eager);

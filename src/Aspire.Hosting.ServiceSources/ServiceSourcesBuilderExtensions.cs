@@ -47,7 +47,8 @@ public static class ServiceSourcesBuilderExtensions
     /// <paramref name="builder"/>, according to the service's configured source: a local
     /// project — either a developer-managed checkout (<c>path</c> in
     /// <c>servicesources.local.json</c>) or a package-managed git clone under
-    /// <c>.servicesources/checkouts/&lt;serviceName&gt;</c> beneath the AppHost directory —
+    /// <c>.servicesources/checkouts/&lt;serviceName&gt;</c> beneath the AppHost directory, or under
+    /// the <c>ServiceSources:CheckoutsDirectory</c> setting when one is configured —
     /// added via Aspire's own <c>AddProject(name, path)</c> without ever
     /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"repository"</c> source); or a
     /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes

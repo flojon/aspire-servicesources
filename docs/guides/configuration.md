@@ -179,6 +179,14 @@ empty section rather than an error:
   message names `ServiceSources:Services:<service>:source` and the environment variable that would
   set it.
 
+## Where managed checkouts live
+
+`ServiceSources:CheckoutsDirectory` (environment variable `ServiceSources__CheckoutsDirectory`,
+`"checkoutsDirectory"` at the root of `servicesources.local.json`) names an absolute local directory to
+hold managed checkouts instead of `<AppHost>/.servicesources/checkouts`. Like the rest of the file it is
+read through the AppHost's configuration, so every layer above overrides it. See [Placing checkouts
+outside the AppHost directory](../sources/repository.md#placing-checkouts-outside-the-apphost-directory).
+
 ## Configuring a resolved service
 
 `AddService()` returns an `IResourceBuilder<ServiceResource>` — a facade that dual-writes

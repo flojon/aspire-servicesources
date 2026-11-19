@@ -27,7 +27,7 @@ public class LocalGitCheckoutSeparateTests
 
     internal sealed record Environment(string AppHost, string GitRoot, CloneLayoutOptions Layout)
     {
-        public string Checkout => LocalGitCheckout.ManagedRepoRoot(AppHost, "orders");
+        public string Checkout => LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(AppHost), "orders");
 
         public string[] GitDirectories => Directory.Exists(GitRoot)
             ? [.. Directory.GetDirectories(GitRoot)]
@@ -49,7 +49,7 @@ public class LocalGitCheckoutSeparateTests
     internal static LocalGitCheckout.PreparedCheckout PrepareManaged(
         Environment environment, IGitClient git, string url, Func<string?>? home = null) =>
         LocalGitCheckout.PrepareRepoRoot(
-            "orders", Definition(url), DevConfig(), repositoryConfig: null, environment.AppHost, git,
+            "orders", Definition(url), DevConfig(), repositoryConfig: null, environment.AppHost, CheckoutsLocation.Default(environment.AppHost), git,
             progress: null, home, environment.Layout);
 
     internal static GitCliClient RealGit() => new(TestRepository.IsolatedEnvironment());
@@ -227,7 +227,7 @@ public class LocalGitCheckoutSeparateTests
     {
         var environment = NewEnvironment();
         var home = TempDirectories.CreateSubdirectory().FullName;
-        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(home, "orders"), ".git"));
+        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(home), "orders"), ".git"));
         var git = new ScriptedCloneGitClient
         {
             HomeOrigin = FakeUrl,

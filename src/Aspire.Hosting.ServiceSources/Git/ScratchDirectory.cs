@@ -147,7 +147,7 @@ internal sealed class ScratchDirectory : IDisposable
         {
             foreach (var orphan in Directory.EnumerateFiles(checkoutsRoot, Prefix + "*" + LockSuffix))
             {
-                if (!Directory.Exists(orphan[..^LockSuffix.Length]))
+                if (!Directory.Exists(orphan[..^LockSuffix.Length]) && !IsReparsePoint(orphan))
                 {
                     SweepOrphanLock(orphan);
                 }
@@ -157,7 +157,8 @@ internal sealed class ScratchDirectory : IDisposable
             {
                 try
                 {
-                    if (SweepOne(directory))
+                    // A link is never followed: the checkouts root can sit where someone else can write.
+                    if (!IsReparsePoint(directory) && SweepOne(directory))
                     {
                         SweepPairedGitDirectory(gitRoot, System.IO.Path.GetFileName(directory)[Prefix.Length..]);
                         log?.Report(Raw.Compose(
@@ -173,6 +174,19 @@ internal sealed class ScratchDirectory : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // The enumeration itself failed, so there is nothing we can sweep.
+        }
+    }
+
+    // A path that vanished mid-sweep is a sibling's cleanup, not a link.
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
         }
     }
 

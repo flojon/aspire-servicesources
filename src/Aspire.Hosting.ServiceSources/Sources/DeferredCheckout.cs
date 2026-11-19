@@ -369,7 +369,7 @@ internal sealed class DeferredCheckout
         // eager path, which is the one that knows how to tell those apart and what to do about
         // each.
         if (LocalGitCheckout.IsColdManagedCheckout(
-                builder.AppHostDirectory, definition.Repository.CheckoutName, config))
+                CheckoutsLocation.For(builder), definition.Repository.CheckoutName, config))
         {
             return true;
         }
@@ -409,12 +409,13 @@ internal sealed class DeferredCheckout
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, PrepareStep? prepareStep, IGitClient? gitClient)
     {
+        var location = CheckoutsLocation.For(builder);
         if (prepareStep is null
             || gitClient is null
             || !builder.ExecutionContext.IsRunMode
             || !LocalGitCheckout.IsManagedCheckout(config)
-            || LocalGitCheckout.IsColdManagedCheckout(
-                builder.AppHostDirectory, definition.Repository.CheckoutName, config))
+            || LocalGitCheckout.IsColdManagedCheckout(location, definition.Repository.CheckoutName, config)
+            || location.Problem is not null)
         {
             return false;
         }
@@ -422,7 +423,7 @@ internal sealed class DeferredCheckout
         return CheckoutPreparation.WouldRunBecauseCommandChanged(
             serviceName,
             prepareStep,
-            LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),
+            LocalGitCheckout.ManagedRepoRoot(location, definition.Repository.CheckoutName),
             builder.AppHostDirectory,
             managedCheckout: true,
             gitClient);
@@ -435,9 +436,10 @@ internal sealed class DeferredCheckout
     /// </summary>
     /// <param name="canDefer">Whether dropping the explicit eager timing would let the dashboard ask.</param>
     internal static ServiceSourcesConfigurationException BlockedChangedCommand(
-        string serviceName, ServiceDefinition definition, PrepareStep step, string appHostDirectory, bool canDefer)
+        string serviceName, ServiceDefinition definition, PrepareStep step, string appHostDirectory,
+        CheckoutsLocation location, bool canDefer)
     {
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName);
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(location, definition.Repository.CheckoutName);
         var marker = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout: true);
 
         var timingHint = canDefer
@@ -469,7 +471,9 @@ internal sealed class DeferredCheckout
         PrepareStep? prepareStep,
         IPrepareCommandRunner prepareRunner)
     {
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName);
+        var location = CheckoutsLocation.For(builder);
+        location.ThrowIfProblem();
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(location, definition.Repository.CheckoutName);
 
         // Through the same confinement the eager path uses, and before anything is registered: the
         // path named here is what DCP freezes into the executable spec and what MSBuild is later
@@ -536,7 +540,9 @@ internal sealed class DeferredCheckout
         IPrepareCommandRunner prepareRunner,
         Func<string, DeferredLocalResource?> resolveDeferred)
     {
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName);
+        var location = CheckoutsLocation.For(builder);
+        location.ThrowIfProblem();
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(location, definition.Repository.CheckoutName);
 
         // Everything the handler adds from here on, identified by reference rather than by index:
         // IResourceCollection supports removal, and a handler that removed one would shift every

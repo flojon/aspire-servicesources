@@ -39,7 +39,7 @@ public class GitPathLimitStagingTests
     public void AppHostDepths_FollowFromTheStagingSuffix()
     {
         var appHost = TempDirectories.CreateSubdirectory().FullName;
-        var checkoutsRoot = Path.GetDirectoryName(LocalGitCheckout.ManagedRepoRoot(appHost, "orders"))!;
+        var checkoutsRoot = Path.GetDirectoryName(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(appHost), "orders"))!;
         Directory.CreateDirectory(checkoutsRoot);
         using var scratch = ScratchDirectory.Create(checkoutsRoot);
 

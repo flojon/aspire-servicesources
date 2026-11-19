@@ -50,6 +50,12 @@ internal static class GitPathLimit
 
     internal static readonly int MaxSeparateAppHostLength = MaxWorkingTreeRootLength - StagingSuffixLength;
 
+    /// <summary>What a staging directory adds to a checkouts directory: <c>\.incoming-&lt;id&gt;</c>.</summary>
+    internal static readonly int StagingInCheckoutsLength = 1 + ScratchDirectory.Prefix.Length + ScratchDirectory.IdLength;
+
+    /// <summary>The longest checkouts directory whose staging directory still fits a root limit.</summary>
+    internal static int MaxCheckoutsRoot(int rootLimit) => rootLimit - StagingInCheckoutsLength;
+
     internal static bool IsUsableGitRoot(string? gitRoot) =>
         !string.IsNullOrEmpty(gitRoot) && gitRoot.Length <= MaxGitRootLength;
 
@@ -66,14 +72,29 @@ internal static class GitPathLimit
     internal static Raw Shorter(int characters) =>
         characters == 1 ? Raw.Literal("1 character") : Raw.Compose($"{characters} characters");
 
+    /// <summary>
+    /// How to make a path <paramref name="excess"/> characters too long fit: for the default location
+    /// move the AppHost or relocate the checkouts, for an external one shorten the setting.
+    /// </summary>
+    internal static Raw ShortenAdvice(CheckoutsLocation location, int excess, int rootLimit) =>
+        location.IsExternal
+            ? Raw.Compose($"Shorten '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}' by at least {Shorter(excess)}: its value, plus the '\\<hash>\\checkouts' the tool appends, gives '{Raw.Display(location.CheckoutsRoot)}'.")
+            : Raw.Compose($"Move the AppHost, or the worktree it is in, to a path at least {Shorter(excess)} shorter, or set '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}' (environment variable '{Raw.Literal(CheckoutsLocation.EnvironmentVariable)}') to a short directory such as '{Raw.Literal(CheckoutsLocation.SuggestedDirectory)}'.");
+
+    /// <summary>What a too-deep checkout kept in place needs before it can be cloned again with a short git directory.</summary>
+    internal static Raw ExistingCheckoutRemedy(CheckoutsLocation location) =>
+        location.IsExternal
+            ? Raw.Compose($"This needs a checkouts directory short enough for the working tree itself (at most {MaxCheckoutsRoot(MaxWorkingTreeRootLength)} characters, less for a long checkout name); shorten '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}'.")
+            : Raw.Compose($"This needs an AppHost path short enough for the working tree itself (about {MaxSeparateAppHostLength} characters, less for a long checkout name); beyond that, move the AppHost to a shorter path, or set '{Raw.Literal(Config.DeveloperConfiguration.CheckoutsDirectoryKey)}' (environment variable '{Raw.Literal(CheckoutsLocation.EnvironmentVariable)}') to a short directory such as '{Raw.Literal(CheckoutsLocation.SuggestedDirectory)}'.");
+
     internal static ServiceSourcesConfigurationException GitRootRefusal(
-        Raw label, string checkoutPath, string longestRoot, int gitDirLimit, string? gitRoot)
+        Raw label, string checkoutPath, string longestRoot, int gitDirLimit, string? gitRoot, CheckoutsLocation location)
     {
         var inPlace = MaxInPlaceRoot(gitDirLimit);
         var why = string.IsNullOrEmpty(gitRoot)
             ? Raw.Literal("The local application data folder is not set, so there is nowhere for it.")
             : Raw.Compose($"'{Raw.Display(gitRoot)}' is {gitRoot.Length} characters, over the {MaxGitRootLength} a git directory under it can have.");
         return ServiceSourcesConfigurationException.For(
-            $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows refuses to run in a repository whose '.git' directory path passes {gitDirLimit} characters (\"'$GIT_DIR' too big\"), whatever core.longpaths or LongPathsEnabled say, so a clone under '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters; at most {inPlace} fit) needs its git directory kept elsewhere. The short directory for that cannot be used here. {why} Move the AppHost, or the worktree it is in, to a path at least {Shorter(longestRoot.Length - inPlace)} shorter.");
+            $"{label}: cannot clone into '{Raw.Display(Path.GetFullPath(checkoutPath))}'. git for Windows refuses to run in a repository whose '.git' directory path passes {gitDirLimit} characters (\"'$GIT_DIR' too big\"), whatever core.longpaths or LongPathsEnabled say, so a clone under '{Raw.Display(longestRoot)}' ({longestRoot.Length} characters; at most {inPlace} fit) needs its git directory kept elsewhere. The short directory for that cannot be used here. {why} {ShortenAdvice(location, longestRoot.Length - inPlace, inPlace)}");
     }
 }

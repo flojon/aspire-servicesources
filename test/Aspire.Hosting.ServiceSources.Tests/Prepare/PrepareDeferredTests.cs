@@ -1297,7 +1297,7 @@ public class PrepareDeferredTests
     {
         var (dir, git, journal) = await WarmCheckoutAsync();
         var markerPath = PrepareMarker.LocationFor(
-            "routing", LocalGitCheckout.ManagedRepoRoot(dir, "routing"), dir, managedCheckout: true)!;
+            "routing", LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(dir), "routing"), dir, managedCheckout: true)!;
         var before = File.ReadAllText(markerPath);
 
         var builder = publish ? TestHelpers.CreatePublishingBuilder(dir) : TestHelpers.CreateBuilderThatCanStart(dir);
@@ -1346,7 +1346,7 @@ public class PrepareDeferredTests
     {
         var (dir, git, journal) = await WarmCheckoutAsync();
         var markerPath = PrepareMarker.LocationFor(
-            "routing", LocalGitCheckout.ManagedRepoRoot(dir, "routing"), dir, managedCheckout: true)!;
+            "routing", LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(dir), "routing"), dir, managedCheckout: true)!;
         var before = File.ReadAllText(markerPath);
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
@@ -1775,7 +1775,7 @@ public class PrepareDeferredTests
     public void NeedsChangedCommandGate_FirstUseNoMarker_False()
     {
         var dir = CreateAppHostDirectory("routing");
-        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(dir, "routing"), ".git"));
+        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(dir), "routing"), ".git"));
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
         Assert.False(DeferredCheckout.NeedsChangedCommandGate(
@@ -1786,7 +1786,7 @@ public class PrepareDeferredTests
     public void NeedsChangedCommandGate_DebrisDirectoryNoGit_FalseAndDoesNotThrow()
     {
         var dir = CreateAppHostDirectory("routing");
-        Directory.CreateDirectory(LocalGitCheckout.ManagedRepoRoot(dir, "routing"));
+        Directory.CreateDirectory(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(dir), "routing"));
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
         Assert.False(DeferredCheckout.NeedsChangedCommandGate(

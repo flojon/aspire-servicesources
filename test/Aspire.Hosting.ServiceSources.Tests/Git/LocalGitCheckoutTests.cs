@@ -70,17 +70,17 @@ public class LocalGitCheckoutTests
     {
         var appHostDirectory = NewAppHostDirectory();
 
-        Assert.True(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", Managed()));
+        Assert.True(LocalGitCheckout.IsColdManagedCheckout(CheckoutsLocation.Default(appHostDirectory), "orders", Managed()));
     }
 
     [Fact]
     public void IsColdManagedCheckout_ACompleteCheckoutAtTheManagedRoot_IsNotCold()
     {
         var appHostDirectory = NewAppHostDirectory();
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders");
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(appHostDirectory), "orders");
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", Managed()));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(CheckoutsLocation.Default(appHostDirectory), "orders", Managed()));
     }
 
     [Fact]
@@ -90,9 +90,9 @@ public class LocalGitCheckoutTests
         // apart from a real working tree, and deciding what to do about it, belongs to
         // PrepareRepoRoot rather than to anything speculating from the path alone.
         var appHostDirectory = NewAppHostDirectory();
-        Directory.CreateDirectory(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders"));
+        Directory.CreateDirectory(LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(appHostDirectory), "orders"));
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", Managed()));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(CheckoutsLocation.Default(appHostDirectory), "orders", Managed()));
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public class LocalGitCheckoutTests
         var appHostDirectory = NewAppHostDirectory();
         var theirs = TempDirectories.CreateSubdirectory().FullName;
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", WithPathOverride(theirs)));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(CheckoutsLocation.Default(appHostDirectory), "orders", WithPathOverride(theirs)));
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class LocalGitCheckoutTests
         var appHostDirectory = NewAppHostDirectory();
         var missing = Path.Combine(appHostDirectory, "gone");
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", WithPathOverride(missing)));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(CheckoutsLocation.Default(appHostDirectory), "orders", WithPathOverride(missing)));
     }
 
     /// <summary>
@@ -143,7 +143,7 @@ public class LocalGitCheckoutTests
     public void ManagedRepoRoot_ANameThatIsNotADirectoryNameOfItsOwn_IsRefused(string serviceName)
     {
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, serviceName));
+            () => LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(UnusedAppHostDirectory), serviceName));
 
         Assert.Contains("cannot be given a managed checkout directory", exception.Message, StringComparison.Ordinal);
     }
@@ -153,7 +153,7 @@ public class LocalGitCheckoutTests
     {
         Assert.Equal(
             Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"),
-            LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, "orders"));
+            LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(UnusedAppHostDirectory), "orders"));
     }
 
     /// <summary>
@@ -169,13 +169,13 @@ public class LocalGitCheckoutTests
     {
         // Before: the plain string a caller with no RepositoryDefinition in hand would use — the
         // shape every route into ManagedRepoRoot took prior to #291.
-        var beforePath = LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, "orders");
+        var beforePath = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(UnusedAppHostDirectory), "orders");
 
         // After: an ungrouped service's own anonymous RepositoryDefinition, whose CheckoutName is
         // always the owning service's own name (design finding 2) — the value every real caller
         // (LocalProjectSource, LocalCheckoutPrefetch, DeferredCheckout) now passes.
         var repository = new RepositoryDefinition { Url = "https://example.com/orders.git", CheckoutName = "orders" };
-        var afterPath = LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, repository.CheckoutName);
+        var afterPath = LocalGitCheckout.ManagedRepoRoot(CheckoutsLocation.Default(UnusedAppHostDirectory), repository.CheckoutName);
 
         Assert.Equal(beforePath, afterPath);
         Assert.Equal(Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"), afterPath);

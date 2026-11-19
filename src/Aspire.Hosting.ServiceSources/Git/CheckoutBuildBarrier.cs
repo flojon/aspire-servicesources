@@ -6,8 +6,10 @@ namespace Aspire.Hosting.ServiceSources.Git;
 /// <c>.servicesources</c> directory.
 /// </summary>
 /// <remarks>
-/// Checkouts live at <c>&lt;AppHostDirectory&gt;/.servicesources/checkouts/&lt;service&gt;/</c>,
-/// which is inside the AppHost's own repository, and every one of those tools finds its settings
+/// Checkouts live at <c>&lt;AppHostDirectory&gt;/.servicesources/checkouts/&lt;service&gt;/</c>
+/// (or under the owned directory of an external <c>ServiceSources:CheckoutsDirectory</c>, where the
+/// same files are written for the same reason), which is inside the AppHost's own repository by
+/// default, and every one of those tools finds its settings
 /// by walking up from a project or a source file: MSBuild for <c>Directory.Build.props</c>,
 /// <c>Directory.Build.targets</c> and <c>Directory.Packages.props</c>, hostfxr and MSBuild for
 /// <c>global.json</c>, the compiler for <c>.editorconfig</c>, and NuGet merging every
