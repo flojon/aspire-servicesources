@@ -3,9 +3,8 @@ using System.Text.Json;
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
-/// The <c>Kestrel:Endpoints:*:Url</c> values a landed checkout's <c>appsettings.json</c> declares —
-/// the endpoints Aspire would have turned into annotations had the repository been on disk while
-/// composing.
+/// The <c>Kestrel:Endpoints:*:Url</c> values a landed checkout's configuration files declare — the
+/// endpoints Aspire would have turned into annotations had the repository been on disk while composing.
 /// </summary>
 internal static class LandedKestrelEndpoints
 {
@@ -13,18 +12,37 @@ internal static class LandedKestrelEndpoints
         new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
     /// <summary>
-    /// Reads <c>appsettings.json</c> then <c>appsettings.{environment}.json</c> beside
-    /// <paramref name="projectFile"/>; the later file wins per endpoint name, as in configuration.
-    /// Unreadable files count as absent.
+    /// The environment Aspire layers environment-specific settings files for: its own process's,
+    /// with <c>ASPNETCORE_ENVIRONMENT</c> ahead of <c>DOTNET_ENVIRONMENT</c> and no default.
     /// </summary>
-    public static IReadOnlyList<string> Read(string projectFile, LandedLaunchProfile profile)
+    public static string? ProcessEnvironment() =>
+        Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+        ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+
+    /// <summary>
+    /// Reads the same optional files, in the same order, as Aspire's own Kestrel lookup; the later
+    /// file wins per endpoint name, as in configuration. Unreadable files count as absent.
+    /// </summary>
+    public static IReadOnlyList<string> Read(string projectFile, string? environment)
     {
         var directory = Path.GetDirectoryName(projectFile) ?? ".";
-        var environment = EnvironmentName(profile);
+        var name = Path.GetFileName(directory);
+
+        var files = new List<string> { "appsettings.json" };
+        if (IsSafeFileNamePart(environment))
+        {
+            files.Add($"appsettings.{environment}.json");
+        }
+
+        files.Add($"{name}.settings.json");
+        if (IsSafeFileNamePart(environment))
+        {
+            files.Add($"{name}.settings.{environment}.json");
+        }
 
         var urls = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var file in new[] { "appsettings.json", $"appsettings.{environment}.json" })
+        foreach (var file in files)
         {
             Merge(Path.Combine(directory, file), urls);
         }
@@ -32,18 +50,9 @@ internal static class LandedKestrelEndpoints
         return [.. urls.Values];
     }
 
-    private static string EnvironmentName(LandedLaunchProfile profile)
-    {
-        foreach (var key in new[] { "DOTNET_ENVIRONMENT", "ASPNETCORE_ENVIRONMENT" })
-        {
-            if (profile.EnvironmentVariables.TryGetValue(key, out var value) && value.Length > 0)
-            {
-                return value;
-            }
-        }
-
-        return "Production";
-    }
+    // The value comes from the environment, and must not be able to steer the path out of the project directory.
+    private static bool IsSafeFileNamePart(string? value) =>
+        !string.IsNullOrEmpty(value) && value.IndexOfAny([.. Path.GetInvalidFileNameChars(), '/', '\\']) < 0;
 
     private static void Merge(string path, Dictionary<string, string> urls)
     {
@@ -56,10 +65,8 @@ internal static class LandedKestrelEndpoints
         {
             using var document = JsonDocument.Parse(File.ReadAllBytes(path), ParseOptions);
 
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty("Kestrel", out var kestrel)
-                || kestrel.ValueKind != JsonValueKind.Object
-                || !kestrel.TryGetProperty("Endpoints", out var endpoints)
+            if (Child(document.RootElement, "Kestrel") is not { } kestrel
+                || Child(kestrel, "Endpoints") is not { } endpoints
                 || endpoints.ValueKind != JsonValueKind.Object)
             {
                 return;
@@ -67,17 +74,35 @@ internal static class LandedKestrelEndpoints
 
             foreach (var endpoint in endpoints.EnumerateObject())
             {
-                if (endpoint.Value.ValueKind == JsonValueKind.Object
-                    && endpoint.Value.TryGetProperty("Url", out var url)
-                    && url.ValueKind == JsonValueKind.String
+                if (Child(endpoint.Value, "Url") is { ValueKind: JsonValueKind.String } url
                     && url.GetString() is { Length: > 0 } value)
                 {
                     urls[endpoint.Name] = value;
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        // InvalidOperationException: a lone surrogate or invalid UTF-8 in a string fails GetString.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
         }
+    }
+
+    // Configuration keys are case-insensitive, so the JSON property names have to be too.
+    private static JsonElement? Child(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return property.Value;
+            }
+        }
+
+        return null;
     }
 }

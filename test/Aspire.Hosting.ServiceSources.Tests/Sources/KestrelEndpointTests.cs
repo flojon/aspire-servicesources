@@ -9,7 +9,8 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 /// <summary>
 /// A <c>"local"</c> .NET service whose endpoints come from <c>Kestrel:Endpoints</c> in
-/// <c>appsettings.json</c> rather than a launch profile's <c>applicationUrl</c> (#398).
+/// <c>appsettings.json</c> rather than a launch profile's <c>applicationUrl</c>. The deferred-path
+/// warning wiring is covered in <see cref="DeferredCheckoutTests"/>.
 /// </summary>
 [Trait("IO", "true")]
 [Trait("Concurrency", "true")]
@@ -21,37 +22,8 @@ public class KestrelEndpointTests
         { "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5200" } } } }
         """;
 
-    private sealed class LandingGitClient(string appSettings, ManualResetEventSlim gate) : IGitClient
-    {
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null, string? separateGitDir = null)
-        {
-            gate.Wait(TimeSpan.FromSeconds(30));
-            Directory.CreateDirectory(destinationPath);
-            File.WriteAllText(Path.Combine(destinationPath, "Service.csproj"), "<Project />");
-            File.WriteAllText(Path.Combine(destinationPath, "appsettings.json"), appSettings);
-        }
-
-        public void Checkout(string repositoryPath, string reference)
-        {
-        }
-
-        public void Fetch(string repositoryPath)
-        {
-        }
-
-        public bool HasUncommittedChanges(string repositoryPath) => false;
-
-        public bool IsRefCheckedOut(string repositoryPath, string reference) => true;
-
-        public string? GetOriginUrl(string repositoryPath) => null;
-    }
-
     private static ServiceDefinition PathDefinition() =>
         new ServiceMetadata { Path = "services/orders", Project = "Orders.csproj", Kind = LocalKinds.Dotnet }
-            .ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
-
-    private static ServiceDefinition RepositoryDefinition() =>
-        new ServiceMetadata { Repository = $"https://example.com/{ServiceName}.git", Project = "Service.csproj" }
             .ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     [Fact]
@@ -72,28 +44,11 @@ public class KestrelEndpointTests
         Assert.Equal(5200, endpoint.Port);
     }
 
-    [Fact]
-    public void DeferredPath_KestrelConfigOnly_DeclaresNoEndpointWhileComposing()
+    private static string WriteProject(
+        string appSettings, string? environment = null, string? environmentAppSettings = null,
+        string? directorySettings = null)
     {
-        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
-        var builder = TestHelpers.CreateBuilder(appHostDir);
-        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
-
-        using var gate = new ManualResetEventSlim(false);
-        var service = new LocalProjectSource(new LandingGitClient(KestrelOnlyAppSettings, gate)).Resolve(
-            builder, ServiceName, RepositoryDefinition(),
-            new() { Source = "repository", Repository = new() });
-
-        // The checkout is still cloning, so appsettings.json is unreadable while Aspire composes the
-        // project and nothing re-reads it afterwards: the Kestrel endpoint the eager path gets is lost.
-        Assert.Empty(service.Resource.Annotations.OfType<EndpointAnnotation>());
-
-        gate.Set();
-    }
-
-    private static string WriteProject(string appSettings, string? environmentAppSettings = null, string? environment = null)
-    {
-        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var dir = Directory.CreateDirectory(Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Service")).FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
         File.WriteAllText(Path.Combine(dir, "appsettings.json"), appSettings);
@@ -101,41 +56,44 @@ public class KestrelEndpointTests
         if (environmentAppSettings is not null)
         {
             File.WriteAllText(Path.Combine(dir, $"appsettings.{environment}.json"), environmentAppSettings);
-            LaunchSettingsFixture.Write(
-                dir,
-                "{ \"profiles\": { \"Service\": { \"commandName\": \"Project\", "
-                + $"\"environmentVariables\": {{ \"DOTNET_ENVIRONMENT\": \"{environment}\" }} }} }} }}");
+        }
+
+        if (directorySettings is not null)
+        {
+            File.WriteAllText(Path.Combine(dir, "Service.settings.json"), directorySettings);
         }
 
         return projectFile;
     }
 
-    private static string? Warn(string projectFile)
+    private static string? Warn(
+        string projectFile, string? environment = null, IReadOnlyList<string>? applicationUrls = null)
     {
-        var resource = new ProjectResource(ServiceName);
-        var profile = LandedLaunchProfile.Read(projectFile, resource);
+        var profile = new LandedLaunchProfile(null, applicationUrls ?? [], new Dictionary<string, string>());
 
         return DeferredCheckout.LaunchProfileEndpointWarning(
-            ServiceName, profile, resource, LandedKestrelEndpoints.Read(projectFile, profile))?.ToString();
+            ServiceName, profile, new ProjectResource(ServiceName),
+            LandedKestrelEndpoints.Read(projectFile, environment))?.ToString();
     }
 
     [Fact]
-    public void LaunchProfileEndpointWarning_KestrelConfigOnly_NamesTheUrl()
+    public void Warning_KestrelConfigOnly_NamesTheUrlAndSource()
     {
         var warning = Warn(WriteProject(KestrelOnlyAppSettings));
 
         Assert.NotNull(warning);
         Assert.Contains("http://localhost:5200", warning);
-        Assert.Contains("WithHttpEndpoint", warning);
+        Assert.Contains("Kestrel:Endpoints", warning);
     }
 
     [Fact]
-    public void LaunchProfileEndpointWarning_EnvironmentAppSettingsOverrideTheBaseUrl()
+    public void Warning_EnvironmentAppSettingsOverrideTheBaseUrl()
     {
-        var warning = Warn(WriteProject(
-            KestrelOnlyAppSettings,
-            """{ "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5300" } } } }""",
-            "Development"));
+        var warning = Warn(
+            WriteProject(
+                KestrelOnlyAppSettings, "Development",
+                """{ "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5300" } } } }"""),
+            "Development");
 
         Assert.NotNull(warning);
         Assert.Contains("http://localhost:5300", warning);
@@ -143,10 +101,72 @@ public class KestrelEndpointTests
     }
 
     [Fact]
-    public void LaunchProfileEndpointWarning_NoKestrelConfig_SaysNothing() =>
-        Assert.Null(Warn(WriteProject("{ }")));
+    public void Warning_EnvironmentFileIsIgnoredWhenNoEnvironmentIsSet()
+    {
+        var warning = Warn(
+            WriteProject(
+                KestrelOnlyAppSettings, "Development",
+                """{ "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5300" } } } }"""));
+
+        Assert.NotNull(warning);
+        Assert.Contains("http://localhost:5200", warning);
+        Assert.DoesNotContain("http://localhost:5300", warning);
+    }
 
     [Fact]
-    public void LaunchProfileEndpointWarning_UnreadableAppSettings_SaysNothing() =>
-        Assert.Null(Warn(WriteProject("{ not json")));
+    public void Read_ProjectDirectorySettingsFile_IsLayeredAfterAppSettings()
+    {
+        var urls = LandedKestrelEndpoints.Read(
+            WriteProject(
+                KestrelOnlyAppSettings,
+                directorySettings: """{ "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5400" } } } }"""),
+            null);
+
+        Assert.Equal(["http://localhost:5400"], urls);
+    }
+
+    [Fact]
+    public void Read_KeysAreCaseInsensitive()
+    {
+        var urls = LandedKestrelEndpoints.Read(
+            WriteProject("""{ "kestrel": { "endpoints": { "web": { "url": "http://localhost:5200" } } } }"""), null);
+
+        Assert.Equal(["http://localhost:5200"], urls);
+    }
+
+    [Theory]
+    [InlineData("../../evil")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    public void Read_EnvironmentNameWithPathSeparators_IsNotUsedToBuildAFilePath(string environment)
+    {
+        var projectFile = WriteProject(KestrelOnlyAppSettings);
+        var outside = Path.Combine(Path.GetDirectoryName(projectFile)!, "..", "evil.json");
+        File.WriteAllText(outside, """{ "Kestrel": { "Endpoints": { "X": { "Url": "http://evil:1" } } } }""");
+
+        Assert.Equal(["http://localhost:5200"], LandedKestrelEndpoints.Read(projectFile, environment));
+    }
+
+    [Fact]
+    public void Warning_KestrelUrlsReplaceApplicationUrlsAndAreDeduplicated()
+    {
+        var warning = Warn(
+            WriteProject(
+                """{ "Kestrel": { "Endpoints": { "A": { "Url": "http://localhost:5200" }, "B": { "Url": "http://localhost:5200" } } } }"""),
+            applicationUrls: ["https://localhost:7001"]);
+
+        Assert.NotNull(warning);
+        Assert.DoesNotContain("7001", warning);
+        Assert.Equal(2, warning.Split("http://localhost:5200").Length);
+    }
+
+    [Fact]
+    public void Warning_NoKestrelConfig_SaysNothing() =>
+        Assert.Null(Warn(WriteProject("{ }")));
+
+    [Theory]
+    [InlineData("{ not json")]
+    [InlineData("""{ "Kestrel": { "Endpoints": { "A": { "Url": "\ud800" } } } }""")]
+    public void Warning_UnreadableAppSettings_SaysNothing(string appSettings) =>
+        Assert.Null(Warn(WriteProject(appSettings)));
 }

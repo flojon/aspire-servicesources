@@ -29,6 +29,8 @@ public class DeferredCheckoutTests
 
         private readonly Dictionary<string, string> _launchSettings = new(StringComparer.Ordinal);
 
+        private readonly Dictionary<string, string> _appSettings = new(StringComparer.Ordinal);
+
         private readonly Dictionary<string, string[]> _progressLines = new(StringComparer.Ordinal);
 
         public List<string> Cloned { get; } = [];
@@ -44,6 +46,9 @@ public class DeferredCheckoutTests
         /// AppHost could not read while composing and the whole reason the landed checkout is re-read.
         /// </summary>
         public void WithLaunchSettings(string repositoryUrl, string json) => _launchSettings[repositoryUrl] = json;
+
+        /// <summary>Gives the cloned repository an <c>appsettings.json</c>, which the AppHost could not read while composing.</summary>
+        public void WithAppSettings(string repositoryUrl, string json) => _appSettings[repositoryUrl] = json;
 
         /// <summary>
         /// Progress lines this repository's clone reports, in git's own wording, before it finishes.
@@ -81,6 +86,11 @@ public class DeferredCheckoutTests
 
             Directory.CreateDirectory(destinationPath);
             File.WriteAllText(Path.Combine(destinationPath, "Service.csproj"), "<Project />");
+
+            if (_appSettings.TryGetValue(repositoryUrl, out var appSettings))
+            {
+                File.WriteAllText(Path.Combine(destinationPath, "appsettings.json"), appSettings);
+            }
 
             if (_launchSettings.TryGetValue(repositoryUrl, out var settings))
             {
@@ -2817,6 +2827,20 @@ public class DeferredCheckoutTests
         var warning = Assert.Single(lines, l => l.Contains("applicationUrl", StringComparison.Ordinal));
         Assert.Contains("5100", warning);
         Assert.DoesNotContain("7100", warning);
+    }
+
+    [Fact]
+    public async Task Deferred_KestrelEndpointsOnly_AfterLanding_WarnsWithTheKestrelUrl()
+    {
+        var git = new FakeGitClient();
+        git.WithAppSettings(OrdersUrl, """{ "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5200" } } } }""");
+
+        var (services, real, _) = await RunColdAsync(new(), git);
+
+        var lines = await ReadLogUntilAsync(services, real, "Checkout ready");
+
+        var warning = Assert.Single(lines, l => l.Contains("Kestrel:Endpoints", StringComparison.Ordinal));
+        Assert.Contains("http://localhost:5200", warning);
     }
 
     [Fact]

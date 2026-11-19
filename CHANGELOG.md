@@ -61,7 +61,7 @@ never existed. Check the tag of the last release before adding one.
 - **A deferred `dotnet` service whose endpoints come from `Kestrel:Endpoints` now gets the same post-clone
   endpoint warning as one using `applicationUrl`** ([#398]). Aspire reads both while composing, so a cold
   checkout carries neither; the warning now also reads `Kestrel:Endpoints:*:Url` from the landed
-  `appsettings.json` and `appsettings.{Environment}.json` and quotes what it found. Warm checkouts are
+  `appsettings` files, using the AppHost's own environment as Aspire does, and quotes what it found. Warm checkouts are
   unchanged: Aspire turns Kestrel endpoints into endpoints itself.
 
 - **Several `"path"` services that resolve to one directory now run an identical `prepare` step once, not once per
