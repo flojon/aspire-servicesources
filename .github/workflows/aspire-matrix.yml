@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   test:
-    name: 🧭 aspire ${{ matrix.aspire }}
+    name: 🧭 aspire ${{ matrix.aspire }} · ${{ matrix.dotnet }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -66,6 +66,11 @@ jobs:
         # without any tracked file changing, so the run id had to be salted into the key to
         # force a miss every run. A resolved version keys the cache honestly instead.
         aspire: [floor, latest]
+        # `net11` adds net11.0 to every multi-targeted project via IncludeNet11Preview (see
+        # Directory.Build.targets) under the 11.0 SDK, which is GA now.
+        # Crossed with `aspire` so a break on a new Aspire release is told apart from one that
+        # only appears on the net11.0 framework.
+        dotnet: [net10, net11]
 
     steps:
       - uses: actions/checkout@v7
@@ -77,6 +82,25 @@ jobs:
         with:
           dotnet-version: |
             10.0.x
+
+      # Installed after 10.0 so the 11.0 SDK drives the build, while 10.0 still supplies the
+      # net10 targeting pack.
+      - uses: actions/setup-dotnet@v6
+        if: matrix.dotnet == 'net11'
+        with:
+          dotnet-version: 11.0.x
+
+      # Every restore, build and test below needs the flag: restore writes the net11.0 assets
+      # only when it sees it, and a build or test that did not would look for them in vain.
+      - name: Select the target frameworks
+        run: |
+          if [ "$DOTNET_LEG" = net11 ]; then
+            echo "INCLUDE_NET11=true" >> "$GITHUB_ENV"
+          else
+            echo "INCLUDE_NET11=false" >> "$GITHUB_ENV"
+          fi
+        env:
+          DOTNET_LEG: ${{ matrix.dotnet }}
 
       # `floor` reads the $(AspireVersion) default out of Directory.Build.props, so this leg
       # builds the same floor ci.yml holds against global.json instead of a copy of it. Parsed as
@@ -169,8 +193,8 @@ jobs:
           # The cost is one cold restore per Aspire release on the `latest` leg, since no entry
           # for a version exists until that leg has built it once. The `floor` leg pays nothing:
           # its resolved version only moves when the floor itself does.
-          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire }}-${{ steps.aspire.outputs.version }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}
-          restore-keys: nuget-${{ runner.os }}-aspire-${{ matrix.aspire }}-${{ steps.aspire.outputs.version }}-
+          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire }}-${{ matrix.dotnet }}-${{ steps.aspire.outputs.version }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-aspire-${{ matrix.aspire }}-${{ matrix.dotnet }}-${{ steps.aspire.outputs.version }}-
 
       # The committed global.json holds the floor, and rewriting it is the only way to move the
       # AppHost SDK: there is no command-line property that reaches an MSBuild SDK version, and
@@ -202,7 +226,7 @@ jobs:
       # and, since #116, the sample's Aspire.Hosting.AppHost in the root one - the three
       # packages that have to land on the same version as the SDK pinned above.
       - name: Restore
-        run: dotnet restore -p:AspireVersion="$ASPIRE_VERSION"
+        run: dotnet restore -p:AspireVersion="$ASPIRE_VERSION" -p:IncludeNet11Preview="$INCLUDE_NET11"
         env:
           ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
@@ -268,12 +292,12 @@ jobs:
       # No -warnaserror here, unlike ci.yml: a newer Aspire is free to add obsoletions, and
       # failing on those would report a deprecation as a compatibility break.
       - name: Build
-        run: dotnet build -c Release --no-restore -p:AspireVersion="$ASPIRE_VERSION"
+        run: dotnet build -c Release --no-restore -p:AspireVersion="$ASPIRE_VERSION" -p:IncludeNet11Preview="$INCLUDE_NET11"
         env:
           ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
       - name: Test
-        run: dotnet test -c Release --no-build -p:AspireVersion="$ASPIRE_VERSION" --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
+        run: dotnet test -c Release --no-build -p:AspireVersion="$ASPIRE_VERSION" -p:IncludeNet11Preview="$INCLUDE_NET11" --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
         env:
           ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
@@ -296,6 +320,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-aspire-${{ matrix.aspire }}
+          name: test-results-aspire-${{ matrix.aspire }}-${{ matrix.dotnet }}
           path: ./artifacts/test-results
           if-no-files-found: warn
