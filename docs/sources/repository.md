@@ -557,6 +557,13 @@ service and the dashboard won't link it. Add the line and the next run is whole;
 on a warm checkout too, where it updates the endpoint the profile already created rather than
 adding one.
 
+Endpoints configured in `appsettings.json` under `Kestrel:Endpoints` follow the same rule. On a warm
+checkout Aspire turns them into endpoints itself, with or without a launch profile. On a deferred first
+checkout the file isn't on disk while the AppHost composes, so none are created; the warning reads
+`Kestrel:Endpoints:*:Url` from `appsettings.json` and `appsettings.{Environment}.json` once the checkout
+lands, with the environment taken from the profile's `DOTNET_ENVIRONMENT` or `ASPNETCORE_ENVIRONMENT` and
+`Production` otherwise, and the fix is the same `WithHttpEndpoint()` line.
+
 Scoped deliberately narrowly, so the blast radius is first-run-only (plus that one changed-command run):
 
 - Only a checkout that doesn't exist yet, plus the one run where a warm checkout's `prepare` command

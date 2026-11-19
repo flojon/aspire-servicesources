@@ -692,7 +692,9 @@ internal sealed class DeferredCheckout
         // Endpoints are the one part that cannot be put back, so the shortfall is reported
         // rather than enforced: refusing to start a service that would have run fine is worse
         // than telling the developer their port is not Aspire's to manage.
-        if (LaunchProfileEndpointWarning(resource.Name, profile, resource) is { } warning)
+        var kestrelUrls = LandedKestrelEndpoints.Read(projectFile, profile);
+
+        if (LaunchProfileEndpointWarning(resource.Name, profile, resource, kestrelUrls) is { } warning)
         {
             ServiceSourcesLog.Warning(logger, $"{warning}");
         }
@@ -791,14 +793,17 @@ internal sealed class DeferredCheckout
     /// </para>
     /// </remarks>
     public static Raw? LaunchProfileEndpointWarning(
-        string serviceName, LandedLaunchProfile profile, IResource resource)
+        string serviceName, LandedLaunchProfile profile, IResource resource,
+        IReadOnlyList<string>? kestrelUrls = null)
     {
         if (resource.Annotations.OfType<EndpointAnnotation>().Any())
         {
             return null;
         }
 
-        var declared = profile.ApplicationUrls;
+        // Kestrel:Endpoints urls are lost to deferral exactly like applicationUrl: Aspire reads both
+        // while composing.
+        var declared = (IReadOnlyList<string>)[.. profile.ApplicationUrls, .. kestrelUrls ?? []];
         if (declared.Count == 0)
         {
             return null;
@@ -811,7 +816,7 @@ internal sealed class DeferredCheckout
 
         return Raw.Compose(
             $"Service '{new Name(serviceName)}' was started from a checkout cloned during this run, and its launch "
-            + $"profile declares applicationUrl '{urls}' — but a project's endpoints are "
+            + $"profile applicationUrl or Kestrel:Endpoints configuration declares '{urls}' — but a project's endpoints are "
             + $"read while the AppHost composes, before the repository was on disk, so Aspire allocated none. "
             + $"The project will bind that URL itself and run, but the port is outside Aspire's management: it "
             + $"is not moved off a collision, nothing proxies it, service discovery cannot resolve this service "
