@@ -60,7 +60,7 @@
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
     <!-- Still preview-only; must match OfficialJavaIntegration.MinimumVersion. -->
     <PackageVersion Include="Aspire.Hosting.Java" Version="13.6.5-preview.1.26559.7" />
-    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.1" />
     <!-- An analyzer core references with PrivateAssets="all". It reaches no nuspec and constrains
          no consumer, so it is not a floor and does not belong in src/Directory.Packages.props —
          where ci.yml's `verify repo invariants` job would require .github/dependabot.yml to ignore
