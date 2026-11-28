@@ -242,4 +242,45 @@ cp "$apphost_dir/appsettings.$PROFILE.json" "$output_dir/appsettings.$PROFILE.js
 expect_source "$PROFILE_SENTINEL" "$(resolved_source copied output - --environment "$PROFILE")" \
   "the same file does take effect once it is where the running process looks"
 
+# ServiceSources:CheckoutsDirectory must be absolute, so a relative sentinel is refused at
+# composition, and the refusal names the key and the value that came in. That makes "was the key
+# read from this layer?" one line of output, with nothing cloned.
+log "8. CheckoutsDirectory is read from the environment layer and from the file"
+rm -f "$apphost_dir/appsettings.json" "$apphost_dir/appsettings.$PROFILE.json"   "$output_dir/appsettings.json" "$output_dir/appsettings.$PROFILE.json"
+CHECKOUTS_ENV_SENTINEL="relative-checkouts-env"
+CHECKOUTS_FILE_SENTINEL="relative-checkouts-file"
+
+expect_checkouts_refusal() {
+  # $1 = sentinel that must be named, $2 = what was being proven
+  local run_log="$cache_dir/config-layers-checkouts.log"
+  grep -qF "ServiceSources:CheckoutsDirectory" "$run_log" && grep -qF "$1" "$run_log"     || fail "$2: expected a refusal naming ServiceSources:CheckoutsDirectory and '$1', got: $(tail -n1 "$run_log")"
+  printf '    %s was refused by name, as expected
+' "$1"
+}
+
+cat > "$apphost_dir/servicesources.local.json" <<EOF
+{
+  "services": {
+    "orders": { "source": "repository" },
+    "inventory": { "source": "url" },
+    "payments": { "source": "url" }
+  }
+}
+EOF
+( cd "$apphost_dir" && env "ServiceSources__CheckoutsDirectory=$CHECKOUTS_ENV_SENTINEL"     dotnet run --project DemoAppHost.csproj --no-build )   > "$cache_dir/config-layers-checkouts.log" 2>&1 || true
+expect_checkouts_refusal "$CHECKOUTS_ENV_SENTINEL" "the environment variable form of the key"
+
+cat > "$apphost_dir/servicesources.local.json" <<EOF
+{
+  "checkoutsDirectory": "$CHECKOUTS_FILE_SENTINEL",
+  "services": {
+    "orders": { "source": "repository" },
+    "inventory": { "source": "url" },
+    "payments": { "source": "url" }
+  }
+}
+EOF
+( cd "$apphost_dir" && dotnet run --project DemoAppHost.csproj --no-build )   > "$cache_dir/config-layers-checkouts.log" 2>&1 || true
+expect_checkouts_refusal "$CHECKOUTS_FILE_SENTINEL" "the checkoutsDirectory key in servicesources.local.json"
+
 log "PASS: every configuration layer won in its turn, and the appsettings layers were read from the content root"

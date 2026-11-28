@@ -25,6 +25,16 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **`ServiceSources:CheckoutsDirectory` places managed checkouts outside the AppHost directory**
+  ([#475]). Set it to an absolute local directory such as `C:\ss`, through the configuration key, the
+  environment variable `ServiceSources__CheckoutsDirectory`, or `"checkoutsDirectory"` in
+  `servicesources.local.json`. Checkouts then live at `<directory>\<hash>\checkouts\<name>`, where the hash
+  of the AppHost path keeps AppHosts that share the directory apart, and a shorter root gives a deep
+  AppHost room under the Windows path limit (not yet measured on a real deep AppHost). The default stays
+  `<AppHost>\.servicesources\checkouts`, nothing is moved, and the path-too-long errors now suggest the
+  setting. See [Placing checkouts outside the AppHost
+  directory](docs/sources/repository.md#placing-checkouts-outside-the-apphost-directory).
+
 - **`builder.UseInteractiveServiceConfiguration()` lets the dashboard choose a source for a service
   nobody configured, instead of the AppHost throwing** ([#128]). The service resolves to a registered
   placeholder that starts nothing, has no endpoints and shows `Not configured`. Once the dashboard is
@@ -2226,3 +2236,4 @@ Targets `net10.0`.
 [#479]: https://github.com/flojon/aspire-servicesources/issues/479
 [#433]: https://github.com/flojon/aspire-servicesources/issues/433
 [#446]: https://github.com/flojon/aspire-servicesources/issues/446
+[#475]: https://github.com/flojon/aspire-servicesources/issues/475

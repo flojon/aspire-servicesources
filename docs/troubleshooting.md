@@ -61,7 +61,8 @@ most. The limit used here is 235, which leaves a margin (the clone is staged und
 segment including the backslash, so for a checkout name of up to 18 characters the staging path is
 the one that counts). For such a name that is an AppHost directory of 190 characters. Beyond it the error
 names the length and how many characters to remove; move the AppHost, or the worktree it is in, to a
-shorter path. If `%LOCALAPPDATA%` is unavailable or its `ServiceSources\git` folder would itself be
+shorter path, or set `ServiceSources:CheckoutsDirectory` to a short directory such as `C:\ss`. When that
+setting is already in use, the error says to shorten it instead. If `%LOCALAPPDATA%` is unavailable or its `ServiceSources\git` folder would itself be
 too long, a deep AppHost is refused with the `'$GIT_DIR' too big` wording instead (it needs a path of
 at most 215 characters, so that git can keep its git directory in the checkout).
 
@@ -70,8 +71,23 @@ at most 215 characters, so that git can keep its git directory in the checkout).
 An existing checkout is never moved. If its git directory is still inside it and its path is too deep
 for git (a checkout path past 215 characters), a start logs a notice: every git command in it fails
 with `'$GIT_DIR' too big`.
-If it has local changes or unpushed commits, move `.servicesources\checkouts\<name>` out of the AppHost; otherwise delete it.
+If it has local changes or unpushed commits, move it out of the checkouts directory the message names; otherwise delete it.
 Then re-run, and it is cloned again with a short git directory (this needs an AppHost path within the limit above, 190 characters for a checkout name of 18 characters or fewer).
+
+### MSBuild "Path ... too long" inside a checkout
+
+A service can fail to build inside its checkout with an MSBuild error such as `Path ... is too long`
+even though git cloned it without complaint: a build adds its own output paths below the checkout, and
+a deep AppHost directory leaves too little room for them. This tool does
+not predict MSBuild's limit, so no refusal fires first. Put the checkouts at a short path instead:
+
+```powershell
+$env:ServiceSources__CheckoutsDirectory = 'C:\ss'
+```
+
+or `"checkoutsDirectory": "C:\\ss"` in `servicesources.local.json`. See [Placing checkouts outside the
+AppHost directory](sources/repository.md#placing-checkouts-outside-the-apphost-directory). Checkouts already
+under `.servicesources/checkouts` are left alone and ignored; delete them to reclaim the space.
 
 ## Getting the full exception detail
 

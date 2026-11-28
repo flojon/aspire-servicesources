@@ -107,7 +107,7 @@ internal static class SeparateGitDirectories
     // A UNC or relative value is never probed, and a drive that is not mounted proves nothing about the checkout.
     private static bool IsLocalRootedPath(string path)
     {
-        if (!Path.IsPathRooted(path) || path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+        if (!PathForms.IsLocalAbsolute(path))
         {
             return false;
         }

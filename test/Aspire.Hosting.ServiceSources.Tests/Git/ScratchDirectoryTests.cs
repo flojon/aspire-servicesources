@@ -205,6 +205,31 @@ public class ScratchDirectoryTests
         Assert.Empty(log);
     }
 
+    [Fact]
+    public void SweepAbandoned_skips_a_reparse_point_named_incoming()
+    {
+        var root = NewRoot();
+        var target = Path.Combine(NewRoot(), "target");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "precious.txt"), "x");
+        var link = Path.Combine(root, ".incoming-aaaaaaaa");
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        File.WriteAllText(link + ".lock", "");
+
+        ScratchDirectory.SweepAbandoned(root);
+
+        Assert.True(File.Exists(Path.Combine(target, "precious.txt")));
+        Assert.True(Directory.Exists(link));
+    }
+
     private sealed class ListSink(List<string> lines) : IGitProgressSink
     {
         public void Report(string line) => lines.Add(line);

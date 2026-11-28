@@ -27,9 +27,11 @@ internal static class ToolDirectory
     /// <summary>
     /// Creates the directory and its <c>.gitignore</c> if they are not there, and returns the path.
     /// </summary>
-    public static string Ensure(string appHostDirectory)
+    public static string Ensure(string appHostDirectory) => EnsureAt(PathIn(appHostDirectory));
+
+    /// <summary>The same for any directory the tool owns, such as an external checkouts location.</summary>
+    public static string EnsureAt(string dir)
     {
-        var dir = PathIn(appHostDirectory);
         Directory.CreateDirectory(dir);
 
         EnsureGitignore(dir);
