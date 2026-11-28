@@ -187,7 +187,7 @@ internal sealed record CheckoutsLocation(
             {
                 Directory.Move(staging, OwnedDirectory);
             }
-            catch (IOException)
+            catch (IOException) when (Directory.Exists(OwnedDirectory) || File.Exists(OwnedDirectory))
             {
                 // A concurrent run of this AppHost may have created it first; its record decides.
                 RequireOwnRecord();
