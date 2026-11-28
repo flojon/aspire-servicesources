@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.CommandLine;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
@@ -16,16 +17,13 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal static class PickerAnswers
 {
     /// <summary>
-    /// Refuses answers that would fail the next run's <c>AddService</c>, with the message that run would give.
+    /// Refuses a service's entry, as it would be written, if the next run's <c>AddService</c> would fail on it,
+    /// with the message that run would give. Fields already in the file count.
     /// </summary>
     /// <param name="appHostDirectory">What a <c>path.path</c> answer is resolved against, as it is at run time.</param>
-    /// <returns>The reason the answers are unusable, or <see langword="null"/> when they are fine.</returns>
+    /// <returns>The reason the entry is unusable, or <see langword="null"/> when it is fine.</returns>
     public static string? Validate(
-        string service,
-        string source,
-        IReadOnlyDictionary<string, string> fields,
-        ServiceDefinition definition,
-        string appHostDirectory)
+        string service, string source, JsonObject entry, ServiceDefinition definition, string appHostDirectory)
     {
         // A stale or forged choice must not reach the file; match with the same case rules as the sources dictionary.
         var offered = SourceChoices.For(definition)
@@ -33,59 +31,14 @@ internal static class PickerAnswers
 
         if (offered is null)
         {
-            return $"Source '{source}' is not available for service '{service}'.";
+            return Raw.Compose($"Source '{Raw.Escaped(source)}' is not available for service '{new Name(service)}'.").ToString();
         }
-
-        // The follow-up rules and the resolve checks below match on the sources' own spelling.
-        source = offered;
-
-        var data = new Dictionary<string, string?> { [$"{service}:source"] = source };
-
-        foreach (var field in SourceFollowUp.FieldsFor(source, definition))
-        {
-            var hasValue = fields.TryGetValue(field.Key, out var value) && !string.IsNullOrWhiteSpace(value);
-
-            if (!hasValue && field.Required)
-            {
-                return $"'{field.Key}' ({field.Label}) is required for source '{source}'.";
-            }
-        }
-
-        foreach (var (key, value) in fields)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                data[$"{service}:{key}"] = value;
-            }
-        }
-
-        using var root = new ConfigurationRoot([new MemoryConfigurationProvider(
-            new MemoryConfigurationSource { InitialData = data })]);
-
-        return CheckSection(service, source, root, definition, appHostDirectory);
-    }
-
-    /// <summary>
-    /// The same checks over a service's whole entry as it would be written, so fields already in the file count.
-    /// </summary>
-    /// <returns>The reason the entry would fail the next run, or <see langword="null"/> when it is fine.</returns>
-    public static string? ValidateEntry(
-        string service, string source, JsonObject entry, ServiceDefinition definition, string appHostDirectory)
-    {
-        var offered = SourceChoices.For(definition)
-            .FirstOrDefault(choice => string.Equals(choice, source, StringComparison.OrdinalIgnoreCase)) ?? source;
 
         var wrapper = new JsonObject { [service] = entry.DeepClone() };
 
         using var root = new ConfigurationRoot([new JsonStreamConfigurationProvider(
             new JsonStreamConfigurationSource { Stream = new MemoryStream(Encoding.UTF8.GetBytes(wrapper.ToJsonString())) })]);
 
-        return CheckSection(service, offered, root, definition, appHostDirectory);
-    }
-
-    private static string? CheckSection(
-        string service, string source, IConfigurationRoot root, ServiceDefinition definition, string appHostDirectory)
-    {
         try
         {
             var section = root.GetSection(service);
@@ -94,33 +47,13 @@ internal static class PickerAnswers
 
             var config = section.Get<ServiceDeveloperConfig>() ?? new ServiceDeveloperConfig();
 
-            ThrowIfUnresolvable(service, source, definition, config, appHostDirectory);
+            return ServiceSourcesBuilderExtensions.Sources[offered]
+                .Requirements(new SourceInput(service, definition, config, appHostDirectory))
+                .Problem?.Message;
         }
         catch (ServiceSourcesConfigurationException ex)
         {
             return ex.Message;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The configuration checks each source's <c>Resolve</c> makes, minus anything with side effects.
-    /// </summary>
-    private static void ThrowIfUnresolvable(
-        string service, string source, ServiceDefinition definition, ServiceDeveloperConfig config, string appHostDirectory)
-    {
-        switch (source)
-        {
-            case "url":
-                UrlSource.ResolveUrl(service, definition, config);
-                break;
-            case "kubernetes":
-                KubernetesSource.Validate(service, definition, config);
-                break;
-            case "path" when config.Path.Path is { } overridePath:
-                PathSource.ResolveOverride(service, overridePath, appHostDirectory);
-                break;
         }
     }
 

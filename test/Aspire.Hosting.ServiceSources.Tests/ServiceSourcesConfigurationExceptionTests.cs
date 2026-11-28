@@ -145,4 +145,32 @@ public class ServiceSourcesConfigurationExceptionTests
             return caught;
         }
     }
+
+    [Fact]
+    public void AsMissingSetting_TagsTheKey_AndReturnsTheSameException()
+    {
+        var exception = new ServiceSourcesConfigurationException("bad");
+
+        var tagged = exception.AsMissingSetting("kubernetes:context");
+
+        Assert.Same(exception, tagged);
+        Assert.Equal("kubernetes:context", tagged.MissingSetting);
+    }
+
+    [Fact]
+    public void MissingSetting_OnAnUntaggedException_IsNull() =>
+        Assert.Null(new ServiceSourcesConfigurationException("bad").MissingSetting);
+
+    [Fact]
+    public void AsMissingSetting_DoesNotChangeTheMessage() =>
+        Assert.Equal("bad", new ServiceSourcesConfigurationException("bad").AsMissingSetting("url:url").Message);
+
+    [Fact]
+    public void AsMissingSetting_TagHoldsOnlyTheKey()
+    {
+        var exception = new ServiceSourcesConfigurationException("secret message").AsMissingSetting("url:url");
+
+        var entry = Assert.Single(exception.Data.Cast<System.Collections.DictionaryEntry>());
+        Assert.Equal("url:url", entry.Value);
+    }
 }

@@ -5,18 +5,37 @@ using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-internal sealed class ContainerSource : IServiceSource
+/// <summary>What <see cref="ContainerSource"/>'s check computed for its build.</summary>
+internal readonly record struct ContainerChecked(string Image, string? Tag, int Port, string Scheme);
+
+internal sealed class ContainerSource : ServiceSource<ContainerChecked>, IServiceSource
 {
-    public IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
+    public override bool IsSwitchRemedy => true;
+
+    // Nothing is asked: the image and port are catalog facts no dialog answer replaces.
+    protected override IReadOnlyList<FollowUpField> FieldsFor(ServiceDefinition definition) => [];
+
+    protected override ContainerChecked Check(SourceInput input)
     {
-        var (image, tag, port, scheme) = Validate(serviceName, definition, config);
+        var (image, tag, port) = ResolveContainerConfig(input.ServiceName, input.Definition, input.Config);
+
+        // Catalog-only, exactly as container.port is: the image decides what it serves on that
+        // port, so there is nothing per-developer to override.
+        var scheme = EndpointScheme.Resolve(
+            input.ServiceName, "container", developerScheme: null, input.Definition.Container?.Scheme, input.Definition.Origin);
+
+        return new ContainerChecked(image, tag, port, scheme);
+    }
+
+    protected override IResourceBuilder<ServiceResource> Build(
+        IDistributedApplicationBuilder builder, SourceInput input, ContainerChecked checkedValues)
+    {
+        var (image, tag, port, scheme) = checkedValues;
 
         // Built by hand rather than via AddContainer so the resource can be a
         // ServiceContainerResource, which adds the IResourceWithServiceDiscovery that
         // ContainerResource lacks. WithImage/WithImageTag are what AddContainer itself uses.
-        var containerBuilder = builder.AddResource(new ServiceContainerResource(serviceName))
+        var containerBuilder = builder.AddResource(new ServiceContainerResource(input.ServiceName))
             .WithImage(image)
             .WithEndpoint(targetPort: port, scheme: scheme, name: scheme);
 
@@ -25,63 +44,12 @@ internal sealed class ContainerSource : IServiceSource
             containerBuilder.WithImageTag(tag);
         }
 
-        return ResolvedService.Bridge(containerBuilder, serviceName, "container");
+        return ResolvedService.Bridge(containerBuilder, input.ServiceName, "container");
     }
 
     public Type? DeclaredResourceType(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Container is null ? null : typeof(ServiceContainerResource);
-
-    public bool IsOfferedFor(ServiceDefinition definition) =>
-        TryGetImageAndPort(definition, out _, out _) == ContainerConfigProblem.None;
-
-    /// <summary>
-    /// Everything <see cref="Resolve"/> can refuse an entry for, before it builds anything: shared with
-    /// <see cref="CanResolve"/> so the two cannot drift apart.
-    /// </summary>
-    private static (string Image, string? Tag, int Port, string Scheme) Validate(
-        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
-    {
-        var (image, tag, port) = ResolveContainerConfig(serviceName, definition, config);
-
-        // Catalog-only, exactly as container.port is: the image decides what it serves on that
-        // port, so there is nothing per-developer to override.
-        var scheme = EndpointScheme.Resolve(
-            serviceName, "container", developerScheme: null, definition.Container?.Scheme, definition.Origin);
-
-        return (image, tag, port, scheme);
-    }
-
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        SourceProbe.Resolves(() => Validate("", definition, config));
-
-    private enum ContainerConfigProblem { None, NoImage, NoPort, PortOutOfRange }
-
-    private static ContainerConfigProblem TryGetImageAndPort(ServiceDefinition definition, out string image, out int port)
-    {
-        image = "";
-        port = 0;
-
-        if (definition.Container is null || string.IsNullOrWhiteSpace(definition.Container.Image))
-        {
-            return ContainerConfigProblem.NoImage;
-        }
-
-        if (definition.Container.Port is not { } declaredPort)
-        {
-            return ContainerConfigProblem.NoPort;
-        }
-
-        if (declaredPort is < 1 or > 65535)
-        {
-            port = declaredPort;
-            return ContainerConfigProblem.PortOutOfRange;
-        }
-
-        image = definition.Container.Image;
-        port = declaredPort;
-        return ContainerConfigProblem.None;
-    }
 
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
@@ -90,12 +58,12 @@ internal sealed class ContainerSource : IServiceSource
         {
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
-                + $"container.image entry.");
+                + $"container.image entry.").AsMissingSetting("container:image");
         }
 
         var port = definition.Container.Port ?? throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
-            + $"container.port entry.");
+            + $"container.port entry.").AsMissingSetting("container:port");
 
         if (port is < 1 or > 65535)
         {

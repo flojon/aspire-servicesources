@@ -25,9 +25,10 @@ service is offered only the sources its catalog entry can actually use:
 | Source | Offered when the service has |
 | --- | --- |
 | `repository` | a repository to clone |
-| `container` | an image and a port |
-| `kubernetes` | a Kubernetes service name |
-| `url`, `path`, `disabled` | always |
+| `container` | an image and a valid port |
+| `kubernetes` | a Kubernetes service name, a supported scheme and, if it gives one, a valid port |
+| `url` | no catalog `url:`, or one that is an `http` or `https` URL |
+| `path`, `disabled` | always |
 
 Leave a service blank to decide later. A source that needs more than its name asks a follow-up in a
 second dialog:
@@ -40,7 +41,9 @@ Answers are checked the way the next run would check them: the same validation a
 hand, plus what resolving the source needs (a `url` must be an absolute `http` or `https` URL, a
 Kubernetes port must be between 1 and 65535 and its scheme `http` or `https`, and a `path` directory
 must exist, relative to the AppHost directory). An answer that would not resolve is reported with the
-same message the next run would give, and nothing is saved for that service.
+same message the next run would give, and nothing is saved for that service. Choosing `container` or `repository`
+is checked the same way, and so is the whole entry as it would be written, so a setting already in
+`servicesources.local.json` counts.
 
 Closing the dialog without saving changes nothing; the services stay unconfigured and the AppHost
 keeps running. Each unconfigured service also has a **Configure** command in the dashboard that

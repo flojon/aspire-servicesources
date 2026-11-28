@@ -38,13 +38,22 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// shape.
 /// </para>
 /// </remarks>
-internal sealed class UrlSource : IServiceSource
+internal sealed class UrlSource : ServiceSource<Uri>, IServiceSource
 {
-    public IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
+    public override bool IsSwitchRemedy => true;
+
+    protected override IReadOnlyList<FollowUpField> FieldsFor(ServiceDefinition definition) =>
+        string.IsNullOrWhiteSpace(definition.Url?.Url)
+            ? [new("url:url", "Service URL", true, InputType.Text)]
+            : [];
+
+    protected override Uri Check(SourceInput input) =>
+        ResolveUrl(input.ServiceName, input.Definition, input.Config);
+
+    protected override IResourceBuilder<ServiceResource> Build(
+        IDistributedApplicationBuilder builder, SourceInput input, Uri uri)
     {
-        var uri = ResolveUrl(serviceName, definition, config);
+        var serviceName = input.ServiceName;
 
         var facade = new ServiceResource(serviceName);
         var endpoint = new EndpointAnnotation(
@@ -62,9 +71,6 @@ internal sealed class UrlSource : IServiceSource
 
         return ResolvedService.BridgeUnregistered(builder, facade, serviceName, "url");
     }
-
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        SourceProbe.Resolves(() => ResolveUrl("", definition, config));
 
     /// <summary>
     /// <paramref name="url"/> with any credentials in it replaced, for the messages that quote it
@@ -109,7 +115,8 @@ internal sealed class UrlSource : IServiceSource
         {
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}' source is 'url' but no URL is configured — set " +
-                $"'url.url' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.");
+                $"'url.url' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.")
+                .AsMissingSetting("url:url");
         }
 
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))

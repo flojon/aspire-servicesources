@@ -8,19 +8,40 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
-{
-    public IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
-    {
-        // The block is checked first so a missing one is reported as that rather than as a scheme
-        // problem, and the scheme ahead of BuildPortForwardArgs, whose last act is to allocate a
-        // port: an unsupported scheme is config validation like the rest and shouldn't burn an
-        // allocation on its way to throwing.
-        var scheme = ResolveScheme(serviceName, definition, config);
+/// <summary>What <see cref="KubernetesSource"/>'s check computed for its build.</summary>
+internal sealed record KubernetesChecked(string Scheme, string Context, int RemotePort, KubernetesMetadata Block);
 
-        var args = BuildPortForwardArgs(serviceName, definition, config, portAllocator, out var localPort, out _);
+internal sealed class KubernetesSource(IPortAllocator portAllocator) : ServiceSource<KubernetesChecked>, IServiceSource
+{
+    public override bool IsSwitchRemedy => true;
+
+    protected override IReadOnlyList<FollowUpField> FieldsFor(ServiceDefinition definition)
+    {
+        List<FollowUpField> fields = [new("kubernetes:context", "Kubernetes context", true, InputType.Text)];
+
+        if (definition.Kubernetes?.Port is null)
+        {
+            fields.Add(new("kubernetes:port", "Kubernetes service port", true, InputType.Number));
+        }
+
+        fields.Add(new("kubernetes:namespace", "Kubernetes namespace (optional)", false, InputType.Text));
+        fields.Add(new("kubernetes:scheme", "Endpoint scheme (optional)", false, InputType.Text));
+
+        return fields;
+    }
+
+    protected override KubernetesChecked Check(SourceInput input) =>
+        CheckEntry(input.ServiceName, input.Definition, input.Config);
+
+    protected override IResourceBuilder<ServiceResource> Build(
+        IDistributedApplicationBuilder builder, SourceInput input, KubernetesChecked checkedValues)
+    {
+        var serviceName = input.ServiceName;
+        var scheme = checkedValues.Scheme;
+
+        var args = ForwardArgs(
+            checkedValues.Block.Service!, checkedValues.Context, checkedValues.RemotePort,
+            input.Config.Kubernetes.Namespace, portAllocator, out var localPort);
 
         // Built by hand rather than via AddExecutable so the resource can be a
         // ServiceExecutableResource, which adds the IResourceWithServiceDiscovery that
@@ -71,17 +92,12 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
         definition.Kubernetes is null ? null : typeof(ServiceExecutableResource);
 
-    public bool IsOfferedFor(ServiceDefinition definition) => HasService(definition);
-
     /// <summary>
     /// Whether the entry names a kubernetes service to forward to: the one precondition
-    /// <see cref="IsOfferedFor"/> reads and <see cref="RequireKubernetesBlock"/> enforces, written once.
+    /// <see cref="RequireKubernetesBlock"/> enforces, written once.
     /// </summary>
     internal static bool HasService(ServiceDefinition definition) =>
         !string.IsNullOrWhiteSpace(definition.Kubernetes?.Service);
-
-    public bool CanResolve(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        SourceProbe.Resolves(() => Validate("", definition, config));
 
     internal static string[] BuildPortForwardArgs(
         string serviceName,
@@ -95,20 +111,30 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
 
         (var context, remotePort) = ResolveForwardTarget(serviceName, kubernetes, definition, config);
 
+        return ForwardArgs(kubernetes.Service!, context, remotePort, config.Kubernetes.Namespace, portAllocator, out localPort);
+    }
+
+    private static string[] ForwardArgs(
+        string service, string context, int remotePort, string? @namespace, IPortAllocator portAllocator, out int localPort)
+    {
         localPort = portAllocator.AllocatePort();
 
-        return KubectlPortForward.Args(
-            kubernetes.Service!, localPort, remotePort, context, config.Kubernetes.Namespace);
+        return KubectlPortForward.Args(service, localPort, remotePort, context, @namespace);
     }
 
     /// <summary>
     /// Every configuration check <see cref="Resolve"/> makes, in the same order, without allocating a port.
     /// </summary>
     /// <exception cref="ServiceSourcesConfigurationException">The configuration would not resolve.</exception>
-    internal static void Validate(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    private static KubernetesChecked CheckEntry(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        ResolveScheme(serviceName, definition, config);
-        ResolveForwardTarget(serviceName, RequireKubernetesBlock(serviceName, definition), definition, config);
+        // Judged before the context and port so a bad catalog scheme hides the source from the picker
+        // (the dialog's own scheme answer is not consulted when it opens).
+        var scheme = ResolveScheme(serviceName, definition, config);
+        var kubernetes = RequireKubernetesBlock(serviceName, definition);
+        var (context, remotePort) = ResolveForwardTarget(serviceName, kubernetes, definition, config);
+
+        return new KubernetesChecked(scheme, context, remotePort, kubernetes);
     }
 
     private static string ResolveScheme(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config) =>
@@ -123,12 +149,12 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         {
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}': source 'kubernetes' requires 'kubernetes.context' in " +
-                $"servicesources.local.json.");
+                $"servicesources.local.json.").AsMissingSetting("kubernetes:context");
         }
 
         var remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}': no port configured for source 'kubernetes' — set " +
-            $"'kubernetes.port' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.");
+            $"'kubernetes.port' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.").AsMissingSetting("kubernetes:port");
 
         if (remotePort is < 1 or > 65535)
         {
@@ -151,7 +177,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         {
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}' source is 'kubernetes' but {Raw.Origin(definition.Origin)} has no " +
-                $"kubernetes.service entry.");
+                $"kubernetes.service entry.").AsMissingSetting("kubernetes:service");
         }
 
         return kubernetes;

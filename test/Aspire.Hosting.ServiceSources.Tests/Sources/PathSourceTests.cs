@@ -89,6 +89,56 @@ public class PathSourceTests
     // === Dotnet-kind resolution ===
 
     [Fact]
+    public void Requirements_OverrideToMissingDirectory_ProblemIsResolveOverridesMessage()
+    {
+        var appHost = TempDirectories.CreateSubdirectory().FullName;
+        var config = DevConfig(path: "missing-orders");
+
+        var problem = new PathSource().Requirements(new SourceInput(ServiceName, Definition(), config, appHost)).Problem;
+        var thrown = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            PathSource.ResolveOverride(ServiceName, "missing-orders", appHost));
+
+        Assert.NotNull(problem);
+        Assert.Equal(thrown.Message, problem.Message);
+        Assert.Null(problem.MissingSetting);
+    }
+
+    [Fact]
+    public void Requirements_OverrideToExistingDirectory_Resolves()
+    {
+        var appHost = TempDirectories.CreateSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(appHost, "orders"));
+
+        var requirements = new PathSource().Requirements(
+            new SourceInput(ServiceName, Definition(), DevConfig(path: "orders"), appHost));
+
+        Assert.True(requirements.Resolves);
+    }
+
+    [Fact]
+    public void Requirements_BlankCatalogPathAndTypoKind_ReportsTheMissingPathFirst()
+    {
+        var appHost = TempDirectories.CreateSubdirectory().FullName;
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource().Resolve(
+                TestHelpers.CreateBuilder(appHost), ServiceName, Definition(kind: "no-such-kind"), DevConfig()));
+
+        Assert.Contains("gives it no directory to use", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_WithOverride_UsesTheCheckedDirectory()
+    {
+        var appHost = CreateAppHostDirectoryWithService(out var serviceDir, "elsewhere/orders");
+        var builder = TestHelpers.CreateBuilder(appHost);
+
+        var service = new PathSource().Resolve(builder, ServiceName, Definition(), DevConfig(path: serviceDir));
+
+        Assert.NotNull(service);
+    }
+
+    [Fact]
     public void Resolve_CatalogPathDotnetKind_ReturnsTheRealRegisteredProject()
     {
         var appHostDir = CreateAppHostDirectoryWithService(out _);

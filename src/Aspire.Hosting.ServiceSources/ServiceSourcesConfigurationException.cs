@@ -51,6 +51,20 @@ public sealed class ServiceSourcesConfigurationException : Exception
 
     internal bool IsUnsettledResourceType => Data.Contains(UnsettledResourceTypeKey);
 
+    private const string MissingSettingKey = "ServiceSources.MissingSetting";
+
+    /// <summary>
+    /// Marks a problem caused by an absent setting and names it, by the key a follow-up field uses.
+    /// The tag holds that constant key only, never a user value, so it cannot carry a secret.
+    /// </summary>
+    internal ServiceSourcesConfigurationException AsMissingSetting(string key)
+    {
+        Data[MissingSettingKey] = key;
+        return this;
+    }
+
+    internal string? MissingSetting => Data[MissingSettingKey] as string;
+
     /// <summary>
     /// Every message on this type is written to be read by the developer who has to act on it, and
     /// the one place it is most likely to be read is where an <c>AddService</c> call takes the

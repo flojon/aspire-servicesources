@@ -24,16 +24,21 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// process to order against). Needs no catalog block or developer-config block of its own.
 /// </para>
 /// </remarks>
-internal sealed class DisabledSource : IServiceSource
+internal sealed class DisabledSource : ServiceSource<NoValues>
 {
-    public IResourceBuilder<ServiceResource> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
+    public override bool IsSwitchRemedy => false;
+
+    protected override IReadOnlyList<FollowUpField> FieldsFor(ServiceDefinition definition) => [];
+
+    protected override NoValues Check(SourceInput input) => default;
+
+    protected override IResourceBuilder<ServiceResource> Build(
+        IDistributedApplicationBuilder builder, SourceInput input, NoValues checkedValues)
     {
-        var facade = new ServiceResource(serviceName);
+        var facade = new ServiceResource(input.ServiceName);
 
         UnregisteredServiceStartupGuard.EnsureRegistered(builder);
 
-        return ResolvedService.BridgeUnregistered(builder, facade, serviceName, "disabled");
+        return ResolvedService.BridgeUnregistered(builder, facade, input.ServiceName, "disabled");
     }
 }
