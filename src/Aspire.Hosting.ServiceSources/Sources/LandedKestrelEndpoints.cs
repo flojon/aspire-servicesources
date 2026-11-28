@@ -75,7 +75,7 @@ internal static class LandedKestrelEndpoints
             foreach (var endpoint in endpoints.EnumerateObject())
             {
                 if (Child(endpoint.Value, "Url") is { ValueKind: JsonValueKind.String } url
-                    && url.GetString() is { Length: > 0 } value)
+                    && url.GetString()?.Trim() is { Length: > 0 } value)
                 {
                     urls[endpoint.Name] = value;
                 }

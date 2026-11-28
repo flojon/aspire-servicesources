@@ -174,6 +174,49 @@ public class KestrelEndpointTests
     }
 
     [Fact]
+    public void Warning_MixedKestrelSchemes_AdvisesBothCalls()
+    {
+        var warning = Warn(WriteProject(
+            """{ "Kestrel": { "Endpoints": { "Web": { "Url": "http://localhost:5200" }, "Tls": { "Url": "https://localhost:7001" } } } }"""));
+
+        Assert.NotNull(warning);
+        Assert.Contains(".WithHttpEndpoint().WithHttpsEndpoint()", warning);
+    }
+
+    [Fact]
+    public void Warning_KestrelUrlWithSurroundingWhitespace_IsClassifiedByItsScheme()
+    {
+        var warning = Warn(WriteProject(
+            """{ "Kestrel": { "Endpoints": { "Web": { "Url": " https://localhost:7001 " } } } }"""));
+
+        Assert.NotNull(warning);
+        Assert.Contains(".WithHttpsEndpoint()", warning);
+        Assert.DoesNotContain(".WithHttpEndpoint()", warning);
+    }
+
+    [Theory]
+    [InlineData("https://localhost:7001", ".WithHttpsEndpoint()", ".WithHttpEndpoint()")]
+    [InlineData("http://localhost:5001", ".WithHttpEndpoint()", ".WithHttpsEndpoint()")]
+    public void Warning_ApplicationUrl_AdvisesTheEndpointCallMatchingTheUrlScheme(
+        string applicationUrl, string expected, string unexpected)
+    {
+        var warning = Warn(WriteProject("{ }"), applicationUrls: [applicationUrl]);
+
+        Assert.NotNull(warning);
+        Assert.Contains(expected, warning);
+        Assert.DoesNotContain(unexpected, warning);
+    }
+
+    [Fact]
+    public void Warning_MixedApplicationUrls_AdvisesBothCalls()
+    {
+        var warning = Warn(WriteProject("{ }"), applicationUrls: ["https://localhost:7001", "http://localhost:5001"]);
+
+        Assert.NotNull(warning);
+        Assert.Contains(".WithHttpEndpoint().WithHttpsEndpoint()", warning);
+    }
+
+    [Fact]
     public void Warning_NoKestrelConfig_SaysNothing() =>
         Assert.Null(Warn(WriteProject("{ }")));
 

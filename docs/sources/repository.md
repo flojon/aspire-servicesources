@@ -555,7 +555,9 @@ actually found: the project still binds that URL itself and runs, but Aspire all
 the port isn't moved off a collision, nothing proxies it, service discovery can't resolve the
 service and the dashboard won't link it. Add the line and the next run is whole; it is correct
 on a warm checkout too, where it updates the endpoint the profile already created rather than
-adding one.
+adding one. Aspire names an endpoint after its scheme, so a service whose URL is `https` takes
+`.WithHttpsEndpoint()` instead (the http call would add a stray `http` endpoint beside it), and a
+service declaring both takes both calls. The warning names the call that fits.
 
 Endpoints configured under `Kestrel:Endpoints` follow the same rule. On a warm checkout Aspire turns them
 into endpoints itself, with or without a launch profile, and ignores the profile's `applicationUrl` when
